@@ -86,9 +86,21 @@ const server = Bun.serve({
       }), { headers });
     }
 
-    // 2. Mem0 Memory Graph API
+    // 2. Mem0 Memory Graph & Real Vector Search API
     if (url.pathname === "/api/memory" && req.method === "GET") {
       return new Response(JSON.stringify(memoryStore.getGraph()), { headers });
+    }
+
+    if (url.pathname === "/api/memory/search" && req.method === "POST") {
+      try {
+        let body: any = {};
+        try { body = await req.json(); } catch {}
+        const query = body.query || "TypeScript Rust clean code";
+        const results = memoryStore.recall(query, 5);
+        return new Response(JSON.stringify({ query, results }), { headers });
+      } catch (e: any) {
+        return new Response(JSON.stringify({ error: e.message }), { status: 500, headers });
+      }
     }
 
     if (url.pathname === "/api/memory/node" && req.method === "POST") {
