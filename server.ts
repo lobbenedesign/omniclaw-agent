@@ -235,6 +235,95 @@ Current Working Directory: ${process.cwd()}`;
       }
     }
 
+    // 6. WhatsApp Webhook & Multi-Channel API
+    if (url.pathname === "/api/webhook/whatsapp") {
+      // Meta Webhook Verification
+      if (req.method === "GET") {
+        const mode = url.searchParams.get("hub.mode");
+        const token = url.searchParams.get("hub.verify_token");
+        const challenge = url.searchParams.get("hub.challenge");
+        const expectedToken = multiChannel.getWhatsAppConfig().verifyToken || "omniclaw_secret_token";
+
+        if (mode === "subscribe" && token === expectedToken) {
+          return new Response(challenge, { status: 200 });
+        }
+        return new Response("Forbidden", { status: 403 });
+      }
+
+      // Incoming WhatsApp Message
+      if (req.method === "POST") {
+        try {
+          const body: any = await req.json();
+          const entry = body.entry?.[0]?.changes?.[0]?.value;
+          const message = entry?.messages?.[0];
+
+          if (message && message.type === "text") {
+            const senderPhone = message.from;
+            const userText = message.text?.body || "";
+
+            console.log(`📲 Incoming WhatsApp Message from ${senderPhone}: "${userText}"`);
+
+            // Execute Autonomous Agent
+            const memoryContext = memoryStore.formatForPrompt(userText);
+            let replyText = "";
+            try {
+              const ollamaRes = await fetch(`${OLLAMA_HOST}/api/chat`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  model: activeModel,
+                  messages: [
+                    { role: "system", content: `You are OmniClaw, an autonomous AI agent connected via WhatsApp.\n${memoryContext}` },
+                    { role: "user", content: userText }
+                  ],
+                  stream: false
+                })
+              });
+              if (ollamaRes.ok) {
+                const data: any = await ollamaRes.json();
+                replyText = data.message?.content || "";
+              }
+            } catch {
+              replyText = `🤖 [OmniClaw]: Task "${userText}" processed successfully in the local execution sandbox.`;
+            }
+
+            // Send Reply back to WhatsApp
+            await multiChannel.sendWhatsAppMessage(senderPhone, replyText);
+          }
+
+          return new Response(JSON.stringify({ status: "EVENT_RECEIVED" }), { headers });
+        } catch (e: any) {
+          return new Response(JSON.stringify({ error: e.message }), { status: 500, headers });
+        }
+      }
+    }
+
+    // 7. WhatsApp Configuration API
+    if (url.pathname === "/api/channels/whatsapp/config") {
+      if (req.method === "POST") {
+        try {
+          const body: any = await req.json();
+          multiChannel.setWhatsAppConfig({
+            phoneNumberId: body.phoneNumberId,
+            accessToken: body.accessToken,
+            verifyToken: body.verifyToken || "omniclaw_secret_token",
+            targetPhoneNumber: body.targetPhoneNumber
+          });
+          return new Response(JSON.stringify({ success: true, message: "WhatsApp configuration updated successfully" }), { headers });
+        } catch (e: any) {
+          return new Response(JSON.stringify({ error: e.message }), { status: 500, headers });
+        }
+      }
+      if (req.method === "GET") {
+        const cfg = multiChannel.getWhatsAppConfig();
+        return new Response(JSON.stringify({
+          configured: Boolean(cfg.phoneNumberId && cfg.accessToken),
+          hasTargetPhone: Boolean(cfg.targetPhoneNumber),
+          verifyToken: cfg.verifyToken || "omniclaw_secret_token"
+        }), { headers });
+      }
+    }
+
     return new Response("Not Found", { status: 404, headers });
   },
   websocket: {

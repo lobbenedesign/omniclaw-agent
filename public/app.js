@@ -14,6 +14,7 @@ document.addEventListener("DOMContentLoaded", () => {
   setupAgentForm();
   setupCodeRunner();
   setupBrowserNavigator();
+  setupWhatsAppChannel();
 });
 
 // Tab Switching
@@ -253,6 +254,52 @@ function setupBrowserNavigator() {
       domContent.textContent = data.extractedText || data.domSummary || data.error || "(No DOM text extracted)";
     } catch (e) {
       domContent.textContent = "Browser Navigation Error: " + e.message;
+    }
+  });
+}
+
+// WhatsApp Configuration Handler
+async function setupWhatsAppChannel() {
+  const btnSave = document.getElementById("btn-save-whatsapp");
+  const phoneIdInput = document.getElementById("input-wa-phone-id");
+  const tokenInput = document.getElementById("input-wa-token");
+  const verifyTokenInput = document.getElementById("input-wa-verify-token");
+  const targetPhoneInput = document.getElementById("input-wa-target-phone");
+  const statusBadge = document.getElementById("whatsapp-status-badge");
+
+  // Load existing config
+  try {
+    const res = await fetch("/api/channels/whatsapp/config");
+    const cfg = await res.json();
+    if (cfg.configured) {
+      statusBadge.textContent = "🟢 Active & Ready";
+      statusBadge.style.color = "#4ade80";
+    } else {
+      statusBadge.textContent = "🟡 Pending Credentials";
+      statusBadge.style.color = "#facc15";
+    }
+  } catch {}
+
+  btnSave?.addEventListener("click", async () => {
+    const phoneNumberId = phoneIdInput.value.trim();
+    const accessToken = tokenInput.value.trim();
+    const verifyToken = verifyTokenInput.value.trim();
+    const targetPhoneNumber = targetPhoneInput.value.trim();
+
+    try {
+      const res = await fetch("/api/channels/whatsapp/config", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ phoneNumberId, accessToken, verifyToken, targetPhoneNumber })
+      });
+      const data = await res.json();
+      if (data.success) {
+        statusBadge.textContent = "🟢 Config Saved!";
+        statusBadge.style.color = "#4ade80";
+        alert("WhatsApp Configuration Saved Successfully!");
+      }
+    } catch (e) {
+      alert("Failed to save WhatsApp config: " + e.message);
     }
   });
 }

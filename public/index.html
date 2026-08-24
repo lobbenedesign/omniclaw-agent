@@ -34,6 +34,7 @@
           <button class="nav-tab" data-tab="memory">🧠 Mem0 Graph</button>
           <button class="nav-tab" data-tab="code">⚡ Smolagents Sandbox</button>
           <button class="nav-tab" data-tab="browser">🌐 Browser-Use</button>
+          <button class="nav-tab" data-tab="channels">📲 WhatsApp & Channels</button>
         </nav>
       </div>
     </header>
@@ -178,6 +179,55 @@ console.log('Platform:', os.platform(), 'CPUs:', os.cpus().length);
                 <span id="browser-current-url" class="text-muted">about:blank</span>
               </div>
               <pre class="dom-content" id="browser-dom-content">// DOM text content will be extracted and rendered here...</pre>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB 5: WHATSAPP & MULTI-CHANNEL GATEWAY -->
+      <section id="tab-channels" class="tab-pane">
+        <div class="memory-grid">
+          <div class="panel">
+            <div class="panel-header">
+              <span class="panel-title">🟢 WhatsApp Cloud API Integration</span>
+              <span class="badge-telemetry" id="whatsapp-status-badge">Configuring</span>
+            </div>
+            <div style="padding: 16px; display: flex; flex-direction: column; gap: 12px;">
+              <div>
+                <label class="form-label">WhatsApp Phone Number ID:</label>
+                <input type="text" id="input-wa-phone-id" class="form-control" placeholder="e.g. 104829104829104">
+              </div>
+              <div>
+                <label class="form-label">Meta Cloud API Permanent Access Token:</label>
+                <input type="password" id="input-wa-token" class="form-control" placeholder="EAAB...">
+              </div>
+              <div>
+                <label class="form-label">Webhook Verify Token:</label>
+                <input type="text" id="input-wa-verify-token" class="form-control" value="omniclaw_secret_token">
+              </div>
+              <div>
+                <label class="form-label">Target Notification Phone Number (with country code):</label>
+                <input type="text" id="input-wa-target-phone" class="form-control" placeholder="e.g. +393401234567">
+              </div>
+              <button class="btn btn-primary" id="btn-save-whatsapp">💾 Save WhatsApp Settings</button>
+            </div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-header">
+              <span class="panel-title">📡 Webhook Endpoint & Multi-Channel Setup</span>
+            </div>
+            <div style="padding: 16px; font-size: 12.5px; color: var(--text-muted); line-height: 1.6; display: flex; flex-direction: column; gap: 10px;">
+              <p><strong style="color: #fff;">1. Meta Webhook URL:</strong></p>
+              <pre style="background: #0d1117; padding: 8px; border-radius: 4px; color: #38bdf8; font-family: var(--font-mono); font-size: 11px;">https://your-domain.com/api/webhook/whatsapp</pre>
+              <p><strong style="color: #fff;">2. Come Funziona il Controllo da WhatsApp:</strong></p>
+              <p>Invia qualsiasi messaggio WhatsApp al tuo numero configurato: OmniClaw riceve il messaggio, consulta il grafo Mem0, elabora la risposta e la invia direttamente nella tua chat WhatsApp in tempo reale.</p>
+              <p><strong style="color: #fff;">3. Altri Canali Connessi:</strong></p>
+              <ul style="margin-left: 20px;">
+                <li>📱 <strong>Telegram Bot</strong>: Long-polling attivo senza porte aperte</li>
+                <li>👾 <strong>Discord Webhooks</strong>: Notifiche e streaming dei task</li>
+                <li>⚡ <strong>WebSockets</strong>: Streaming nativo bidirezionale</li>
+              </ul>
             </div>
           </div>
         </div>
