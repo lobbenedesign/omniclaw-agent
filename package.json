@@ -1,0 +1,22 @@
+{
+  "name": "omniclaw-agent",
+  "version": "1.0.0",
+  "description": "The Next-Gen Autonomous AI Unicorn unifying OpenClaw, Browser-Use, Smolagents Code Execution, and Mem0 Graph Memory.",
+  "main": "server.ts",
+  "scripts": {
+    "start": "bun server.ts",
+    "dev": "bun --watch server.ts"
+  },
+  "keywords": [
+    "ai-agent",
+    "openclaw",
+    "browser-use",
+    "smolagents",
+    "mem0",
+    "deepseek-r1",
+    "claude-code",
+    "autonomous-agent"
+  ],
+  "author": "Giuseppe Lobbene",
+  "license": "MIT"
+}

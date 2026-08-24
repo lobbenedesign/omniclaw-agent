@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>OmniClaw — The Autonomous AI Agent Unicorn</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="app-layout">
+    <!-- TOPBAR -->
+    <header class="app-topbar">
+      <div class="topbar-left">
+        <div class="app-logo">
+          <span class="logo-icon">🦄</span>
+          <div class="logo-text">
+            <span class="logo-title">OmniClaw</span>
+            <span class="logo-badge">Unicorn v1.0</span>
+          </div>
+        </div>
+        <div class="topbar-chips">
+          <span class="chip chip-model" id="chip-active-model">⚡ qwen2.5:7b</span>
+          <span class="chip chip-mem" id="chip-mem-count">🧠 2 Knowledge Nodes</span>
+          <span class="chip chip-tasks" id="chip-tasks-count">🚀 0 Tasks Done</span>
+          <span class="chip chip-ws" id="chip-ws-status">🟢 WebSocket Live</span>
+        </div>
+      </div>
+      <div class="topbar-right">
+        <nav class="topbar-tabs">
+          <button class="nav-tab active" data-tab="agent">🤖 Agent Canvas</button>
+          <button class="nav-tab" data-tab="memory">🧠 Mem0 Graph</button>
+          <button class="nav-tab" data-tab="code">⚡ Smolagents Sandbox</button>
+          <button class="nav-tab" data-tab="browser">🌐 Browser-Use</button>
+        </nav>
+      </div>
+    </header>
+
+    <!-- MAIN BODY -->
+    <main class="app-content">
+      <!-- TAB 1: AGENT CANVAS -->
+      <section id="tab-agent" class="tab-pane active">
+        <div class="canvas-grid">
+          <!-- Left: Agent Stream & Timeline -->
+          <div class="panel canvas-main">
+            <div class="panel-header">
+              <span class="panel-title">🤖 Autonomous Agent Execution Stream</span>
+              <button class="btn btn-secondary btn-sm" id="btn-clear-canvas">Clear Stream</button>
+            </div>
+            <div class="stream-container" id="agent-stream-output">
+              <div class="agent-welcome-card">
+                <div class="welcome-icon">🦄</div>
+                <h3>Welcome to OmniClaw</h3>
+                <p>The unified autonomous agent that <strong>thinks in executable code</strong> (Smolagents), <strong>navigates the web</strong> (Browser-Use), and <strong>retains permanent knowledge</strong> (Mem0).</p>
+                <div class="welcome-pills">
+                  <span class="pill">⚡ Executable Code Sandbox</span>
+                  <span class="pill">🧠 Semantic Memory Graph</span>
+                  <span class="pill">🌐 Live DOM Navigation</span>
+                  <span class="pill">📱 Multi-Channel Gateway</span>
+                </div>
+              </div>
+            </div>
+            <div class="canvas-input-bar">
+              <form id="form-agent-prompt" class="prompt-form">
+                <textarea id="input-agent-prompt" placeholder="Ask OmniClaw to solve a complex coding task, research the web, or run an autonomous multi-step workflow..." rows="2"></textarea>
+                <div class="prompt-form-footer">
+                  <span class="hint-text">Shift + Enter for new line • Enter to execute</span>
+                  <button type="submit" class="btn btn-primary" id="btn-submit-agent">
+                    <span>Execute Workflow</span>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+
+          <!-- Right: Execution Trace & Context -->
+          <div class="panel canvas-side">
+            <div class="panel-header">
+              <span class="panel-title">⏱️ Execution Trace & Context</span>
+            </div>
+            <div class="trace-container" id="agent-trace-list">
+              <div class="trace-item">
+                <div class="trace-badge">1</div>
+                <div class="trace-content">
+                  <strong>Memory Subsystem</strong>
+                  <p>Mem0 semantic graph is active and synchronized.</p>
+                </div>
+              </div>
+              <div class="trace-item">
+                <div class="trace-badge">2</div>
+                <div class="trace-content">
+                  <strong>Code Execution Sandbox</strong>
+                  <p>Smolagents TypeScript/Python engine is ready.</p>
+                </div>
+              </div>
+              <div class="trace-item">
+                <div class="trace-badge">3</div>
+                <div class="trace-content">
+                  <strong>Browser Automation</strong>
+                  <p>DOM parser and web search engine initialized.</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB 2: MEM0 MEMORY GRAPH -->
+      <section id="tab-memory" class="tab-pane">
+        <div class="memory-grid">
+          <div class="panel">
+            <div class="panel-header">
+              <span class="panel-title">🧠 Mem0 Semantic Memory Nodes</span>
+              <button class="btn btn-primary btn-sm" id="btn-add-node">➕ Add Knowledge Node</button>
+            </div>
+            <div class="memory-nodes-list" id="memory-nodes-container"></div>
+          </div>
+          <div class="panel">
+            <div class="panel-header">
+              <span class="panel-title">📌 Working Context & Relations</span>
+            </div>
+            <div class="memory-details-box">
+              <label class="form-label">Active Working Context:</label>
+              <textarea id="input-working-context" class="form-control" rows="4"></textarea>
+              <button class="btn btn-secondary btn-sm" id="btn-save-working-ctx" style="margin-top: 8px;">💾 Save Working Context</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB 3: SMOLAGENTS CODE SANDBOX -->
+      <section id="tab-code" class="tab-pane">
+        <div class="code-sandbox-grid">
+          <div class="panel">
+            <div class="panel-header">
+              <span class="panel-title">⚡ Smolagents Code Execution ("Think in Code")</span>
+              <select id="select-code-lang" class="form-control" style="width: 140px;">
+                <option value="typescript">TypeScript (Bun)</option>
+                <option value="python">Python 3</option>
+                <option value="shell">Shell Command</option>
+              </select>
+            </div>
+            <textarea id="input-code-snippet" class="code-editor" placeholder="// Write executable code here...
+const os = require('os');
+console.log('Platform:', os.platform(), 'CPUs:', os.cpus().length);
+"></textarea>
+            <div style="padding: 10px; display: flex; justify-content: flex-end;">
+              <button class="btn btn-primary" id="btn-run-code">▶ Execute Code Sandbox</button>
+            </div>
+          </div>
+          <div class="panel">
+            <div class="panel-header">
+              <span class="panel-title">🖥️ Execution Output & Telemetry</span>
+              <span class="badge-telemetry" id="code-exec-telemetry">0 ms</span>
+            </div>
+            <pre class="code-output-terminal" id="code-output-terminal">// Output will appear here after execution...</pre>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB 4: BROWSER-USE VISION -->
+      <section id="tab-browser" class="tab-pane">
+        <div class="browser-grid">
+          <div class="panel">
+            <div class="panel-header">
+              <span class="panel-title">🌐 Browser-Use Web Navigation & Search</span>
+            </div>
+            <div class="browser-nav-bar">
+              <input type="text" id="input-browser-url" class="form-control" placeholder="Enter URL (https://...) or search query">
+              <button class="btn btn-primary" id="btn-browser-navigate">Navigate / Search</button>
+            </div>
+            <div class="browser-dom-viewer">
+              <div class="dom-header">
+                <strong id="browser-page-title">DuckDuckGo Search</strong>
+                <span id="browser-current-url" class="text-muted">about:blank</span>
+              </div>
+              <pre class="dom-content" id="browser-dom-content">// DOM text content will be extracted and rendered here...</pre>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

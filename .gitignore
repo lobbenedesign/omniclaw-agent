@@ -1,0 +1,14 @@
+# Dependencies
+node_modules/
+bun.lockb
+package-lock.json
+
+# Local Data & Secrets
+.omniclaw_data/
+.env
+.env.local
+*.log
+
+# OS Metadata
+.DS_Store
+Thumbs.db
