@@ -215,17 +215,34 @@ console.log('Platform:', os.platform(), 'CPUs:', os.cpus().length);
 
           <div class="panel">
             <div class="panel-header">
+              <span class="panel-title">📱 Telegram Bot (long-polling reale)</span>
+              <span class="badge-telemetry" id="telegram-status-badge">Non configurato</span>
+            </div>
+            <div style="padding: 16px; display: flex; flex-direction: column; gap: 12px;">
+              <label class="form-label">Bot Token (da @BotFather):</label>
+              <input type="password" id="input-tg-token" class="form-control" placeholder="123456789:AA...">
+              <button class="btn btn-primary" id="btn-save-telegram">💾 Connetti Bot Telegram</button>
+              <p style="font-size: 11.5px; color: var(--text-muted); margin-top: 4px;">
+                Al salvataggio il token viene verificato realmente con una chiamata <code>getMe</code>, poi si avvia un
+                long-polling reale su <code>getUpdates</code>: nessun webhook pubblico richiesto. Ogni messaggio ricevuto
+                passa dal loop agente reale (memoria + LLM locale + esecuzione codice) e la risposta viene rispedita
+                davvero via Bot API.
+              </p>
+            </div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-header">
               <span class="panel-title">📡 Webhook Endpoint & Multi-Channel Setup</span>
             </div>
             <div style="padding: 16px; font-size: 12.5px; color: var(--text-muted); line-height: 1.6; display: flex; flex-direction: column; gap: 10px;">
               <p><strong style="color: #fff;">1. Meta Webhook URL:</strong></p>
               <pre style="background: #0d1117; padding: 8px; border-radius: 4px; color: #38bdf8; font-family: var(--font-mono); font-size: 11px;">https://your-domain.com/api/webhook/whatsapp</pre>
-              <p><strong style="color: #fff;">2. Come Funziona il Controllo da WhatsApp:</strong></p>
-              <p>Invia qualsiasi messaggio WhatsApp al tuo numero configurato: OmniClaw riceve il messaggio, consulta il grafo Mem0, elabora la risposta e la invia direttamente nella tua chat WhatsApp in tempo reale.</p>
+              <p><strong style="color: #fff;">2. Come Funziona il Controllo da WhatsApp/Telegram:</strong></p>
+              <p>Invia un messaggio al tuo numero WhatsApp o al tuo bot Telegram configurato: OmniClaw lo riceve, consulta il grafo di memoria reale, chiama l'LLM locale via Ollama, esegue realmente eventuali blocchi di codice proposti, e rispedisce la risposta reale nella chat.</p>
               <p><strong style="color: #fff;">3. Altri Canali Connessi:</strong></p>
               <ul style="margin-left: 20px;">
-                <li>📱 <strong>Telegram Bot</strong>: Long-polling attivo senza porte aperte</li>
-                <li>👾 <strong>Discord Webhooks</strong>: Notifiche e streaming dei task</li>
+                <li>👾 <strong>Discord Webhooks</strong>: Notifiche e streaming dei task (richiede webhook URL reale)</li>
                 <li>⚡ <strong>WebSockets</strong>: Streaming nativo bidirezionale</li>
               </ul>
             </div>

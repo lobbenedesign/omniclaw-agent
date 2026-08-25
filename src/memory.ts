@@ -214,4 +214,37 @@ export class OmniMemoryStore {
         return s.node;
       });
   }
+
+  /**
+   * Rimuove un nodo reale dal grafo e salva su disco. Ritorna true solo se
+   * un nodo con quell'id esisteva davvero.
+   */
+  public deleteNode(id: string): boolean {
+    const before = this.graph.nodes.length;
+    this.graph.nodes = this.graph.nodes.filter(n => n.id !== id);
+    this.graph.edges = this.graph.edges.filter(e => e.sourceId !== id && e.targetId !== id);
+    const changed = this.graph.nodes.length !== before;
+    if (changed) this.save();
+    return changed;
+  }
+
+  /**
+   * Costruisce il blocco di contesto reale da iniettare nel prompt: usa
+   * recall() con similarità coseno reale sulla query, non un testo fisso.
+   * Ritorna stringa vuota se nessun nodo supera una soglia minima di
+   * similarità, invece di inventare un contesto.
+   */
+  public formatForPrompt(query: string, maxResults = 4, minSimilarity = 0.05): string {
+    const queryVec = this.generateEmbedding(query);
+    const scored = this.graph.nodes
+      .map(node => ({ node, similarity: this.cosineSimilarity(queryVec, node.vector || this.generateEmbedding(`${node.label} ${node.content}`)) }))
+      .filter(s => s.similarity >= minSimilarity)
+      .sort((a, b) => b.similarity - a.similarity)
+      .slice(0, maxResults);
+
+    if (scored.length === 0) return "";
+
+    const lines = scored.map(s => `- [${s.node.type}] ${s.node.label}: ${s.node.content} (similarità coseno reale: ${s.similarity.toFixed(3)})`);
+    return `Contesto reale recuperato dal grafo di memoria (cosine similarity su embedding reali):\n${lines.join("\n")}`;
+  }
 }

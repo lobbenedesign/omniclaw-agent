@@ -32,19 +32,31 @@ In 2026, the biggest viral breakthroughs on GitHub emerged in 4 distinct categor
 
 ### 🌟 Core Architectural Pillars
 
+> **Nota onesta**: la v1.0.0 dichiarava "3x faster execution" e "70% lower
+> token consumption" senza alcun benchmark nel repo, l'agent loop mostrava
+> un messaggio "Task processed successfully" fabbricato ogni volta che
+> Ollama non era raggiungibile (senza eseguire nulla per davvero), e il
+> token Telegram veniva salvato ma non era collegato a nessuna vera
+> chiamata API. Tutto questo è stato corretto: nessuna metrica di
+> performance non misurata, nessun fallback che finge successo, Telegram
+> ora invia/riceve messaggi reali via Bot API.
+
 #### 1. ⚡ "Think in Executable Code" Engine (Smolagents Style)
-* Instead of generating dozens of verbose JSON tool calls, OmniClaw generates and evaluates sandboxed TypeScript, Python, and Shell snippets directly.
-* **3x faster execution**, 70% lower token consumption, and seamless multi-step loop handling.
+* Il loop dell'agente chiama davvero un LLM locale via Ollama; se la risposta contiene blocchi di codice TypeScript/Python/Shell, questi vengono **eseguiti realmente** in sandbox (processo reale, stdout/stderr reali) e il risultato entra nel trace mostrato in UI.
+* Se Ollama non è raggiungibile, l'agente riporta un errore esplicito invece di un messaggio di successo inventato.
 
 #### 2. 🌐 Visual & DOM Web Navigation (Browser-Use Style)
-* Autonomous web search, live DOM structure parsing, element extraction, and web research without external proprietary APIs.
+* Fetch HTTP reale della pagina/ricerca DuckDuckGo, parsing reale del titolo e del contenuto testuale del DOM. Non è un browser headless con click/scroll simulati: è un estrattore di contenuto reale via richieste HTTP dirette.
 
-#### 3. 🧠 Self-Evolving Semantic Knowledge Graph (Mem0 Style)
-* Automatically extracts entities, relations, rules, and user preferences into a persistent knowledge graph (`.omniclaw_data/memory_graph.json`).
-* Injects contextual graph recall into every prompt with high semantic accuracy.
+#### 3. 🧠 Semantic Knowledge Graph con Embedding Reali (Mem0 Style)
+* Genera vettori a 384 dimensioni con un feature-hashing su parole e trigrammi (hash trick, non un modello neurale pre-addestrato), normalizzati L2, e calcola una vera cosine similarity per il recall. È un embedding lessicale reale e verificabile, non un modello semantico allenato: due frasi con sinonimi diversi ma stesso significato potrebbero non risultare simili.
+* Salvataggio persistente reale su `.omniclaw_data/memory_graph.json`.
 
 #### 4. 📲 Multi-Channel Remote Gateway (OpenClaw Style)
-* Autonomous task dispatch across Web UI, WebSocket streaming, Telegram bot, and Discord webhooks.
+* **WhatsApp**: webhook Meta Cloud API reale, verificato e funzionante.
+* **Telegram**: bot reale via long-polling su `getUpdates` (nessun webhook pubblico richiesto), verificato con una chiamata `getMe` al salvataggio del token.
+* **Discord**: webhook reale in broadcast.
+* **WebSocket**: streaming nativo bidirezionale per gli eventi UI.
 
 ---
 
@@ -80,10 +92,10 @@ Nel panorama open source del 2026, i progetti più virali su GitHub si sono conc
 
 ### 🌟 Pilastri Architetturali
 
-1. **⚡ Motore "Think in Code"**: l'agente esegue codice reale per risolvere problemi complessi, riducendo del 70% il consumo di token.
-2. **🌐 Navigatore Web & DOM**: estrazione intelligente di contenuti web e ricerche autonome DuckDuckGo.
-3. **🧠 Memoria Semantica a Grafo**: memorizzazione permanente delle preferenze e delle relazioni logiche in `.omniclaw_data/memory_graph.json`.
-4. **📲 Gateway Multi-Canale**: controllo unificato da browser, WebSocket, Telegram e Discord.
+1. **⚡ Motore "Think in Code"**: l'agente chiama un LLM locale reale (Ollama) e, se propone codice, lo esegue davvero in sandbox — nessuna cifra di risparmio token dichiarata senza misurazione.
+2. **🌐 Navigatore Web & DOM**: fetch HTTP reale + parsing testo del DOM (no click/scroll simulati, è estrazione di contenuto).
+3. **🧠 Memoria Semantica a Grafo**: embedding reali a 384 dimensioni via feature-hashing (non un modello neurale), cosine similarity reale, persistenza reale in `.omniclaw_data/memory_graph.json`.
+4. **📲 Gateway Multi-Canale**: WhatsApp (webhook reale), Telegram (bot reale via long-polling), Discord (webhook reale), WebSocket (streaming reale).
 
 ---
 

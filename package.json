@@ -1,7 +1,7 @@
 {
   "name": "omniclaw-agent",
-  "version": "1.0.0",
-  "description": "The Next-Gen Autonomous AI Unicorn unifying OpenClaw, Browser-Use, Smolagents Code Execution, and Mem0 Graph Memory.",
+  "version": "1.1.0",
+  "description": "Agent locale con esecuzione reale di codice, memoria a grafo con embedding hash-based e cosine similarity, navigazione web via fetch reale, e canali WhatsApp/Telegram/Discord reali.",
   "main": "server.ts",
   "scripts": {
     "start": "bun server.ts",

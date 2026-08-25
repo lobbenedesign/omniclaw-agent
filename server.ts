@@ -23,6 +23,130 @@ let activeModel = "qwen2.5:7b";
 let totalTasksExecuted = 0;
 let lastExecutionTrace: any[] = [];
 
+// Estrae blocchi di codice fenced reali (```typescript / ```python / ```shell)
+// dalla risposta dell'LLM. Nessuna esecuzione se l'LLM non ne propone.
+function extractCodeBlocks(text: string): { language: "typescript" | "python" | "shell"; code: string }[] {
+  const blocks: { language: "typescript" | "python" | "shell"; code: string }[] = [];
+  const re = /```(typescript|ts|python|py|shell|bash|sh)\n([\s\S]*?)```/gi;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text))) {
+    const tag = m[1].toLowerCase();
+    const language: "typescript" | "python" | "shell" =
+      tag === "python" || tag === "py" ? "python" :
+      tag === "shell" || tag === "bash" || tag === "sh" ? "shell" : "typescript";
+    blocks.push({ language, code: m[2].trim() });
+  }
+  return blocks;
+}
+
+/**
+ * Loop agente reale: recall di memoria reale -> chiamata LLM reale via Ollama
+ * -> se l'LLM propone blocchi di codice, li esegue DAVVERO col code engine
+ * sandboxato e riporta output reale nel trace. Se Ollama non è raggiungibile
+ * ritorna un errore onesto, mai un messaggio di successo fabbricato.
+ */
+async function runAgentLoop(prompt: string, model: string) {
+  const trace: any[] = [];
+
+  const memoryContext = memoryStore.formatForPrompt(prompt);
+  trace.push({
+    step: 1,
+    type: "memory_recall",
+    title: "Recall reale dal grafo di memoria (cosine similarity)",
+    detail: memoryContext ? "Nodi rilevanti recuperati con similarità coseno reale" : "Nessun nodo di memoria supera la soglia di similarità"
+  });
+
+  const systemPrompt = `Sei OMNICLAW, un agente autonomo che unisce esecuzione di codice reale (TypeScript/Python/Shell), navigazione web reale e memoria a grafo reale.
+Se la richiesta richiede calcoli, elaborazione dati o azioni concrete, rispondi includendo un blocco di codice fenced (\`\`\`typescript, \`\`\`python o \`\`\`shell) con codice REALMENTE eseguibile: verrà eseguito davvero e il suo output reale ti verrà mostrato.
+${memoryContext}
+Cartella di lavoro corrente: ${process.cwd()}`;
+
+  let ollamaOk = false;
+  let replyText = "";
+  try {
+    const ollamaRes = await fetch(`${OLLAMA_HOST}/api/chat`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model,
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: prompt }
+        ],
+        stream: false
+      }),
+      signal: AbortSignal.timeout(60000)
+    });
+    if (ollamaRes.ok) {
+      const data: any = await ollamaRes.json();
+      replyText = data.message?.content || "";
+      ollamaOk = true;
+    }
+  } catch {
+    ollamaOk = false;
+  }
+
+  if (!ollamaOk) {
+    trace.push({
+      step: 2,
+      type: "error",
+      title: "LLM locale non raggiungibile",
+      detail: `Nessuna risposta da Ollama su ${OLLAMA_HOST}. Avvia Ollama ('ollama serve') e verifica che il modello '${model}' sia disponibile ('ollama pull ${model}').`
+    });
+    return {
+      success: false,
+      model,
+      prompt,
+      reply: "",
+      error: `Impossibile contattare Ollama su ${OLLAMA_HOST}. Nessuna risposta è stata generata: nessun task è stato realmente eseguito.`,
+      trace,
+      codeResults: []
+    };
+  }
+
+  trace.push({
+    step: 2,
+    type: "reasoning",
+    title: "Risposta reale del modello",
+    detail: `Risposta ricevuta da ${model} (${replyText.length} caratteri)`
+  });
+
+  // Esecuzione REALE dei blocchi di codice proposti dal modello (Think in Code).
+  const blocks = extractCodeBlocks(replyText);
+  const codeResults: any[] = [];
+  for (const block of blocks) {
+    const result = await codeEngine.execute(block.code, block.language);
+    codeResults.push(result);
+    trace.push({
+      step: trace.length + 1,
+      type: "code_execution",
+      title: `Esecuzione reale (${block.language})`,
+      detail: result.success
+        ? `Exit 0 in ${result.executionTimeMs}ms — stdout: ${result.stdout.slice(0, 200) || "(vuoto)"}`
+        : `Fallita (exit ${result.exitCode}) — stderr: ${result.stderr.slice(0, 200)}`
+    });
+  }
+
+  if (prompt.length > 10) {
+    memoryStore.addOrUpdateNode({
+      type: "fact",
+      label: prompt.slice(0, 30),
+      content: `Richiesta utente del ${new Date().toLocaleDateString()}: "${prompt.slice(0, 120)}"`,
+      confidence: 0.9,
+      tags: ["session-task", "autonomous"]
+    });
+  }
+
+  trace.push({
+    step: trace.length + 1,
+    type: "completion",
+    title: "Esecuzione completata",
+    detail: codeResults.length > 0 ? `${codeResults.filter(r => r.success).length}/${codeResults.length} blocchi di codice eseguiti con successo` : "Nessun blocco di codice proposto dal modello per questa richiesta"
+  });
+
+  return { success: true, model, prompt, reply: replyText, trace, codeResults };
+}
+
 console.log(`\n======================================================`);
 console.log(`🦄 OMNICLAW AGENT UNICORN running on http://localhost:${PORT}`);
 console.log(`🧠 Mem0 Knowledge Graph: Initialized`);
@@ -75,7 +199,7 @@ const server = Bun.serve({
       const graph = memoryStore.getGraph();
       return new Response(JSON.stringify({
         status: "online",
-        version: "1.0.0-unicorn",
+        version: "1.1.0",
         activeModel,
         memoryNodesCount: graph.nodes.length,
         memoryEdgesCount: graph.edges.length,
@@ -158,90 +282,19 @@ const server = Bun.serve({
       }
     }
 
-    // 5. Autonomous Agent Loop (Think in Code + Web + Memory)
+    // 5. Autonomous Agent Loop (Think in Code + Web + Memory) — reale, mai fabbricato
     if (url.pathname === "/api/agent/run" && req.method === "POST") {
       try {
         const body: any = await req.json();
         const prompt = body.prompt || "";
         const model = body.model || activeModel;
 
-        const trace: any[] = [];
-        totalTasksExecuted += 1;
+        const result = await runAgentLoop(prompt, model);
+        if (result.success) totalTasksExecuted += 1;
+        lastExecutionTrace = result.trace;
+        server.publish("omniclaw-events", JSON.stringify({ type: "agent_finished", prompt, trace: result.trace }));
 
-        // Step 1: Recall Memory
-        const memoryContext = memoryStore.formatForPrompt(prompt);
-        trace.push({
-          step: 1,
-          type: "memory_recall",
-          title: "Mem0 Semantic Graph Recall",
-          detail: memoryContext ? "Recalled relevant knowledge graph nodes" : "No specific prior memory nodes found"
-        });
-
-        // Step 2: System Prompt Composition
-        const systemPrompt = `You are OMNICLAW, an elite autonomous AI agent unifying Smolagents (code execution), Browser-Use (web automation), and Mem0 (graph memory).
-When solving tasks, you think in executable code snippets, inspect web DOMs, and reason through structured steps.
-${memoryContext}
-Current Working Directory: ${process.cwd()}`;
-
-        // Step 3: Stream Inference from LLM
-        trace.push({
-          step: 2,
-          type: "reasoning",
-          title: "Autonomous Code & Action Planning",
-          detail: `Reasoning with ${model}...`
-        });
-
-        let replyText = "";
-        try {
-          const ollamaRes = await fetch(`${OLLAMA_HOST}/api/chat`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              model,
-              messages: [
-                { role: "system", content: systemPrompt },
-                { role: "user", content: prompt }
-              ],
-              stream: false
-            })
-          });
-
-          if (ollamaRes.ok) {
-            const data: any = await ollamaRes.json();
-            replyText = data.message?.content || "";
-          }
-        } catch {
-          replyText = `[OmniClaw Autonomous Response for: "${prompt}"]\n\n1. **Memory State**: Graph synchronised.\n2. **Code Engine**: Executable sandbox ready.\n3. **Browser Engine**: DOM navigation ready.\n\nTask processed successfully across the OmniClaw unified pipeline.`;
-        }
-
-        // Step 4: Auto-Memory Update
-        if (prompt.length > 10) {
-          memoryStore.addOrUpdateNode({
-            type: "fact",
-            label: prompt.slice(0, 30),
-            content: `User query on ${new Date().toLocaleDateString()}: "${prompt.slice(0, 120)}"`,
-            confidence: 0.9,
-            tags: ["session-task", "autonomous"]
-          });
-        }
-
-        trace.push({
-          step: 3,
-          type: "completion",
-          title: "Execution Completed",
-          detail: "Task completed with graph memory update"
-        });
-
-        lastExecutionTrace = trace;
-        server.publish("omniclaw-events", JSON.stringify({ type: "agent_finished", prompt, trace }));
-
-        return new Response(JSON.stringify({
-          success: true,
-          model,
-          prompt,
-          reply: replyText,
-          trace
-        }), { headers });
+        return new Response(JSON.stringify(result), { headers: { ...headers }, status: result.success ? 200 : 502 });
       } catch (e: any) {
         return new Response(JSON.stringify({ error: e.message }), { status: 500, headers });
       }
@@ -275,31 +328,11 @@ Current Working Directory: ${process.cwd()}`;
 
             console.log(`📲 Incoming WhatsApp Message from ${senderPhone}: "${userText}"`);
 
-            // Execute Autonomous Agent
-            const memoryContext = memoryStore.formatForPrompt(userText);
-            let replyText = "";
-            try {
-              const ollamaRes = await fetch(`${OLLAMA_HOST}/api/chat`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  model: activeModel,
-                  messages: [
-                    { role: "system", content: `You are OmniClaw, an autonomous AI agent connected via WhatsApp.\n${memoryContext}` },
-                    { role: "user", content: userText }
-                  ],
-                  stream: false
-                })
-              });
-              if (ollamaRes.ok) {
-                const data: any = await ollamaRes.json();
-                replyText = data.message?.content || "";
-              }
-            } catch {
-              replyText = `🤖 [OmniClaw]: Task "${userText}" processed successfully in the local execution sandbox.`;
-            }
+            const result = await runAgentLoop(userText, activeModel);
+            const replyText = result.success
+              ? result.reply
+              : `⚠️ ${result.error}`;
 
-            // Send Reply back to WhatsApp
             await multiChannel.sendWhatsAppMessage(senderPhone, replyText);
           }
 
@@ -333,6 +366,46 @@ Current Working Directory: ${process.cwd()}`;
           hasTargetPhone: Boolean(cfg.targetPhoneNumber),
           verifyToken: cfg.verifyToken || "omniclaw_secret_token"
         }), { headers });
+      }
+    }
+
+    // 8. Telegram Configuration + Real Long-Polling Bot
+    if (url.pathname === "/api/channels/telegram/config") {
+      if (req.method === "POST") {
+        try {
+          const body: any = await req.json();
+          const token: string = body.token || "";
+          if (!token) {
+            return new Response(JSON.stringify({ error: "Token del bot Telegram mancante." }), { status: 400, headers });
+          }
+          multiChannel.setTelegramToken(token);
+
+          // Verifica reale del token con una chiamata getMe prima di avviare il polling.
+          const meRes = await fetch(`https://api.telegram.org/bot${token}/getMe`);
+          if (!meRes.ok) {
+            return new Response(JSON.stringify({ error: "Token Telegram non valido (verifica getMe fallita)." }), { status: 400, headers });
+          }
+          const me: any = await meRes.json();
+
+          multiChannel.stopTelegramPolling();
+          multiChannel.startTelegramPolling(async (chatId, text) => {
+            console.log(`📲 Incoming Telegram Message from ${chatId}: "${text}"`);
+            const result = await runAgentLoop(text, activeModel);
+            const replyText = result.success ? result.reply : `⚠️ ${result.error}`;
+            await multiChannel.sendTelegramMessage(chatId, replyText);
+          });
+
+          return new Response(JSON.stringify({ success: true, botUsername: me.result?.username || null }), { headers });
+        } catch (e: any) {
+          return new Response(JSON.stringify({ error: e.message }), { status: 500, headers });
+        }
+      }
+      if (req.method === "GET") {
+        return new Response(JSON.stringify({ configured: multiChannel.hasTelegram() }), { headers });
+      }
+      if (req.method === "DELETE") {
+        multiChannel.stopTelegramPolling();
+        return new Response(JSON.stringify({ success: true }), { headers });
       }
     }
 

@@ -15,6 +15,7 @@ document.addEventListener("DOMContentLoaded", () => {
   setupCodeRunner();
   setupBrowserNavigator();
   setupWhatsAppChannel();
+  setupTelegramChannel();
 });
 
 // Tab Switching
@@ -110,7 +111,14 @@ function setupAgentForm() {
       });
       const data = await res.json();
 
-      assistantCard.innerHTML = `<strong style="color: #38bdf8;">🦄 OmniClaw Autonomous Agent:</strong><div style="margin-top: 8px; line-height: 1.5; white-space: pre-wrap;">${data.reply}</div>`;
+      if (!data.success) {
+        assistantCard.innerHTML = `<strong style="color: #f87171;">⚠️ OmniClaw — nessuna risposta generata:</strong><div style="margin-top: 8px; line-height: 1.5;">${data.error || "Errore sconosciuto"}</div>`;
+      } else {
+        const codeNote = (data.codeResults || []).length > 0
+          ? `<div style="margin-top:8px; font-size:11.5px; color:#4ade80;">✓ ${data.codeResults.filter(r => r.success).length}/${data.codeResults.length} blocchi di codice eseguiti realmente</div>`
+          : "";
+        assistantCard.innerHTML = `<strong style="color: #38bdf8;">🦄 OmniClaw Autonomous Agent:</strong><div style="margin-top: 8px; line-height: 1.5; white-space: pre-wrap;">${data.reply}</div>${codeNote}`;
+      }
       output.scrollTop = output.scrollHeight;
 
       if (data.trace && traceList) {
@@ -300,6 +308,51 @@ async function setupWhatsAppChannel() {
       }
     } catch (e) {
       alert("Failed to save WhatsApp config: " + e.message);
+    }
+  });
+}
+
+// Telegram Bot (long-polling reale)
+async function setupTelegramChannel() {
+  const btnSave = document.getElementById("btn-save-telegram");
+  const tokenInput = document.getElementById("input-tg-token");
+  const statusBadge = document.getElementById("telegram-status-badge");
+  if (!btnSave) return;
+
+  try {
+    const res = await fetch("/api/channels/telegram/config");
+    const cfg = await res.json();
+    if (cfg.configured) {
+      statusBadge.textContent = "🟢 Polling Attivo";
+      statusBadge.style.color = "#4ade80";
+    }
+  } catch {}
+
+  btnSave.addEventListener("click", async () => {
+    const token = tokenInput.value.trim();
+    if (!token) return;
+    btnSave.disabled = true;
+    btnSave.textContent = "🔄 Verifica token reale (getMe)...";
+    try {
+      const res = await fetch("/api/channels/telegram/config", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token })
+      });
+      const data = await res.json();
+      if (data.error) {
+        statusBadge.textContent = "🔴 Errore";
+        statusBadge.style.color = "#f87171";
+        alert("Errore Telegram: " + data.error);
+      } else {
+        statusBadge.textContent = `🟢 Connesso: @${data.botUsername}`;
+        statusBadge.style.color = "#4ade80";
+      }
+    } catch (e) {
+      alert("Errore di rete: " + e.message);
+    } finally {
+      btnSave.disabled = false;
+      btnSave.textContent = "💾 Connetti Bot Telegram";
     }
   });
 }
