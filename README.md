@@ -47,6 +47,9 @@ In 2026, the biggest viral breakthroughs on GitHub emerged in 4 distinct categor
 
 #### 2. 🌐 Visual & DOM Web Navigation (Browser-Use Style)
 * Fetch HTTP reale della pagina/ricerca DuckDuckGo, parsing reale del titolo e del contenuto testuale del DOM. Non è un browser headless con click/scroll simulati: è un estrattore di contenuto reale via richieste HTTP dirette.
+* **"Click"**: segue davvero un `<a href>` reale estratto dall'ultima pagina (richiesta HTTP GET reale verso l'URL reale), non un click DOM simulato.
+* **"Type" / compilazione form — NUOVO**: estrae davvero i `<form>` (action, method, campi `<input>`/`<textarea>`/`<select>`) dall'ultima pagina e può compilarli e inviarli con una vera richiesta HTTP (GET con query string, o POST `application/x-www-form-urlencoded`) verso l'`action` reale del form — lo stesso protocollo che userebbe un browser per un submit non-JS. Verificato in questo ambiente contro `https://httpbin.org/forms/post`: httpbin ha rieccheggiato esattamente i valori inviati (`custname`, `custtel`, `custemail`, `comments`, ecc.).
+* **Limite onesto (a differenza del vero browser-use, che guida un vero browser Playwright/Chromium)**: nessun motore JavaScript, nessun DOM renderizzato. Un form la cui struttura o il cui invio dipendono da JavaScript lato client (SPA React/Vue con `onSubmit` in JS, contenuto caricato via `fetch()` dopo il load) non viene visto né inviato correttamente da questa implementazione. Per coprire quel caso servirebbe un vero browser headless (es. Playwright) — non è stato aggiunto in questa passata per non introdurre una dipendenza pesante non ancora verificata end-to-end; se serve, va installata e cablata per davvero, non simulata.
 
 #### 3. 🧠 Semantic Knowledge Graph con Embedding Reali (Mem0 Style)
 * Genera vettori a 384 dimensioni con un feature-hashing su parole e trigrammi (hash trick, non un modello neurale pre-addestrato), normalizzati L2, e calcola una vera cosine similarity per il recall. È un embedding lessicale reale e verificabile, non un modello semantico allenato: due frasi con sinonimi diversi ma stesso significato potrebbero non risultare simili.
@@ -93,7 +96,7 @@ Nel panorama open source del 2026, i progetti più virali su GitHub si sono conc
 ### 🌟 Pilastri Architetturali
 
 1. **⚡ Motore "Think in Code"**: l'agente chiama un LLM locale reale (Ollama) e, se propone codice, lo esegue davvero in sandbox — nessuna cifra di risparmio token dichiarata senza misurazione.
-2. **🌐 Navigatore Web & DOM**: fetch HTTP reale + parsing testo del DOM (no click/scroll simulati, è estrazione di contenuto).
+2. **🌐 Navigatore Web & DOM**: fetch HTTP reale + parsing testo del DOM (no click/scroll simulati, è estrazione di contenuto). "Click" = segue un `<a href>` reale. "Type"/form fill (NUOVO) = estrae e invia davvero i `<form>` HTML statici trovati sulla pagina (GET/POST reali verso l'action reale) — verificato contro httpbin.org/forms/post; i form la cui logica dipende da JavaScript client-side restano fuori portata senza un vero browser headless.
 3. **🧠 Memoria Semantica a Grafo**: embedding reali a 384 dimensioni via feature-hashing (non un modello neurale), cosine similarity reale, persistenza reale in `.omniclaw_data/memory_graph.json`.
 4. **📲 Gateway Multi-Canale**: WhatsApp (webhook reale), Telegram (bot reale via long-polling), Discord (webhook reale), WebSocket (streaming reale).
 

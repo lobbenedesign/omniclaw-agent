@@ -407,6 +407,25 @@ const server = Bun.serve({
       }
     }
 
+    // 4c. Fill and submit a real form extracted from the last navigated page
+    // (real HTTP GET/POST to the form's real action URL — no headless browser,
+    // no JS onsubmit handlers executed, see src/browser_agent.ts).
+    if (url.pathname === "/api/browser/submit-form" && req.method === "POST") {
+      try {
+        const body: any = await req.json();
+        const formIndex = Number(body.formIndex);
+        const values: Record<string, string> = body.values && typeof body.values === "object" ? body.values : {};
+        if (!Number.isFinite(formIndex)) {
+          return new Response(JSON.stringify({ error: "formIndex (number) is required" }), { status: 400, headers });
+        }
+        const result = await browserAgent.fillAndSubmitForm(formIndex, values);
+        server.publish("omniclaw-events", JSON.stringify({ type: "browser_action", result }));
+        return new Response(JSON.stringify(result), { headers, status: result.success ? 200 : 404 });
+      } catch (e: any) {
+        return new Response(JSON.stringify({ error: e.message }), { status: 500, headers });
+      }
+    }
+
     // 5. Autonomous Agent Loop (Think in Code + Web + Memory) — reale, mai fabbricato
     if (url.pathname === "/api/agent/run" && req.method === "POST") {
       try {
