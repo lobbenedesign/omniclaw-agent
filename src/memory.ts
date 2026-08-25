@@ -250,8 +250,15 @@ export class OmniMemoryStore {
         const b = nodes[j];
         if (toRemove.has(b.id) || a.type !== b.type) continue;
 
-        const vecA = a.vector || this.generateEmbedding(`${a.label} ${a.content}`);
-        const vecB = b.vector || this.generateEmbedding(`${b.label} ${b.content}`);
+        // Deduplicazione basata solo sul CONTENUTO, non su label+content come
+        // recall()/formatForPrompt(): due fatti identici scritti con label
+        // diverse (es. "x"/"y") devono comunque risultare duplicati. Usare
+        // il vettore precomputato (che include la label) darebbe una
+        // similarita' artificialmente bassa tra duplicati reali - bug
+        // verificato: 0.61 invece di ~1.0 per contenuto identico con label
+        // diverse, sotto qualunque soglia ragionevole.
+        const vecA = this.generateEmbedding(a.content);
+        const vecB = this.generateEmbedding(b.content);
         const sim = this.cosineSimilarity(vecA, vecB);
         if (sim < threshold) continue;
 
