@@ -8,6 +8,7 @@ import { OmniMemoryStore } from "./src/memory";
 import { OmniCodeEngine } from "./src/code_engine";
 import { OmniBrowserAgent } from "./src/browser_agent";
 import { OmniMultiChannelGateway } from "./src/multi_channel";
+import { decomposeIntoSubtasks, CrewSubtask } from "./src/crew_planner";
 import { join } from "path";
 import { existsSync, readFileSync } from "fs";
 
@@ -186,6 +187,91 @@ Cartella di lavoro corrente: ${process.cwd()}`;
   });
 
   return { success: true, model, prompt, reply: lastReply, trace, codeResults, stepsUsed };
+}
+
+/**
+ * Crew mode reale (stile CrewAI role delegation): prima chiama davvero
+ * `decomposeIntoSubtasks` per far scomporre al modello locale la richiesta in
+ * sotto-task con ruoli distinti; se la scomposizione fallisce onestamente
+ * (Ollama irraggiungibile, JSON non valido, o un solo sotto-task) ricade
+ * sull'esecuzione a singolo agente già verificata (`runAgentLoop`) — non
+ * inventa mai ruoli fittizi. Se ci sono >=2 sotto-task reali, esegue ognuno
+ * in sequenza con `runAgentLoop`, iniettando nel prompt del sotto-task
+ * successivo l'output REALE (non riassunto a mano) del sotto-task
+ * precedente come contesto — lo stesso pattern di "context passing" che
+ * CrewAI applica tra i task di una crew sequenziale.
+ */
+async function runCrew(prompt: string, model: string, maxStepsPerSubtask = 3) {
+  const decomposition = await decomposeIntoSubtasks(prompt, callOllama, model);
+
+  if (!decomposition || decomposition.length <= 1) {
+    const single = await runAgentLoop(prompt, model, Math.max(4, maxStepsPerSubtask));
+    return {
+      ...single,
+      crewMode: false,
+      decomposition: decomposition,
+      subtasks: [{
+        role: "Agente Unico",
+        goal: prompt,
+        reply: single.reply,
+        success: single.success,
+        trace: single.trace,
+        codeResults: single.codeResults
+      }]
+    };
+  }
+
+  const subtaskResults: any[] = [];
+  let previousOutput = "";
+  let allSucceeded = true;
+
+  for (let i = 0; i < decomposition.length; i++) {
+    const subtask: CrewSubtask = decomposition[i];
+    const subPrompt = `[Ruolo assegnato: ${subtask.role}]\nObiettivo di questo sotto-task: ${subtask.goal}\nRichiesta originale dell'utente (contesto generale): ${prompt}${previousOutput ? `\n\nOutput reale prodotto dal sotto-task precedente (usalo come contesto, non ripeterlo da zero):\n${previousOutput.slice(0, 1500)}` : ""}`;
+
+    const result = await runAgentLoop(subPrompt, model, maxStepsPerSubtask);
+    if (!result.success) allSucceeded = false;
+    subtaskResults.push({
+      role: subtask.role,
+      goal: subtask.goal,
+      reply: result.reply,
+      success: result.success,
+      error: (result as any).error ?? null,
+      trace: result.trace,
+      codeResults: result.codeResults
+    });
+    previousOutput = result.reply || previousOutput;
+
+    if (!result.success) break; // onesto: non si prosegue a un sotto-task successivo se quello reale è fallito
+  }
+
+  // Sintesi finale reale: un'ultima chiamata Ollama che combina gli output
+  // reali di tutti i sotto-task riusciti in una risposta unificata. Se
+  // fallisce, si usa l'ultimo output reale disponibile senza inventarne uno nuovo.
+  let finalReply = previousOutput;
+  if (allSucceeded && subtaskResults.length > 1) {
+    const synthesisPrompt = `Combina i seguenti output reali prodotti dai sotto-task del team in un'unica risposta finale coerente per l'utente, che aveva chiesto: "${prompt}"\n\n${subtaskResults.map((s, idx) => `--- Sotto-task ${idx + 1} (${s.role}): ${s.goal} ---\n${s.reply}`).join("\n\n")}`;
+    const synthesis = await callOllama(model, [
+      { role: "system", content: "Sei il coordinatore finale di un team di agenti. Rispondi SOLO con la sintesi finale in linguaggio naturale, senza blocchi di codice." },
+      { role: "user", content: synthesisPrompt }
+    ]);
+    if (synthesis.ok && synthesis.content) finalReply = synthesis.content;
+  }
+
+  return {
+    success: allSucceeded,
+    crewMode: true,
+    model,
+    prompt,
+    decomposition,
+    subtasks: subtaskResults,
+    reply: finalReply,
+    trace: subtaskResults.flatMap((s, idx) => [
+      { step: 0, type: "crew_role_start", title: `Sotto-task ${idx + 1}/${subtaskResults.length} — ruolo: ${s.role}`, detail: s.goal },
+      ...s.trace
+    ]),
+    codeResults: subtaskResults.flatMap((s) => s.codeResults)
+  };
 }
 
 /**
@@ -439,6 +525,26 @@ const server = Bun.serve({
         server.publish("omniclaw-events", JSON.stringify({ type: "agent_finished", prompt, trace: result.trace }));
 
         return new Response(JSON.stringify(result), { headers: { ...headers }, status: result.success ? 200 : 502 });
+      } catch (e: any) {
+        return new Response(JSON.stringify({ error: e.message }), { status: 500, headers });
+      }
+    }
+
+    // 5a-bis. Crew mode reale (CrewAI-style role delegation): decompone davvero
+    // il task in sotto-task con ruoli distinti (via Ollama) ed esegue ciascuno
+    // in sequenza, passando l'output reale come contesto. Vedi runCrew() sopra.
+    if (url.pathname === "/api/agent/crew-run" && req.method === "POST") {
+      try {
+        const body: any = await req.json();
+        const prompt = body.prompt || "";
+        const model = body.model || activeModel;
+
+        const result = await runCrew(prompt, model, Math.max(1, Math.min(5, Math.floor(body.maxStepsPerSubtask) || 3)));
+        if (result.success) totalTasksExecuted += 1;
+        lastExecutionTrace = result.trace;
+        server.publish("omniclaw-events", JSON.stringify({ type: "crew_finished", prompt, subtaskCount: result.subtasks.length }));
+
+        return new Response(JSON.stringify(result), { headers, status: result.success ? 200 : 502 });
       } catch (e: any) {
         return new Response(JSON.stringify({ error: e.message }), { status: 500, headers });
       }

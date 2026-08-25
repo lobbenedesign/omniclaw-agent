@@ -103,8 +103,10 @@ function setupAgentForm() {
 
     input.value = "";
 
+    const crewMode = document.getElementById("input-crew-mode")?.checked;
+
     try {
-      const res = await fetch("/api/agent/run", {
+      const res = await fetch(crewMode ? "/api/agent/crew-run" : "/api/agent/run", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ prompt })
@@ -113,6 +115,12 @@ function setupAgentForm() {
 
       if (!data.success) {
         assistantCard.innerHTML = `<strong style="color: #f87171;">⚠️ OmniClaw — nessuna risposta generata:</strong><div style="margin-top: 8px; line-height: 1.5;">${data.error || "Errore sconosciuto"}</div>`;
+      } else if (data.crewMode) {
+        const roleList = (data.subtasks || []).map(s => `<span style="display:inline-block; margin:2px 4px 2px 0; padding:2px 8px; border-radius:10px; background:rgba(139,92,246,0.15); border:1px solid rgba(139,92,246,0.35); font-size:10.5px; color:#c4b5fd;">${s.role}</span>`).join("");
+        const codeNote = (data.codeResults || []).length > 0
+          ? `<div style="margin-top:8px; font-size:11.5px; color:#4ade80;">✓ ${data.codeResults.filter(r => r.success).length}/${data.codeResults.length} blocchi di codice eseguiti realmente su ${data.subtasks.length} sotto-task</div>`
+          : "";
+        assistantCard.innerHTML = `<strong style="color: #38bdf8;">🦄 OmniClaw Crew (${data.subtasks.length} ruoli reali):</strong><div style="margin-top:6px;">${roleList}</div><div style="margin-top: 8px; line-height: 1.5; white-space: pre-wrap;">${data.reply}</div>${codeNote}`;
       } else {
         const codeNote = (data.codeResults || []).length > 0
           ? `<div style="margin-top:8px; font-size:11.5px; color:#4ade80;">✓ ${data.codeResults.filter(r => r.success).length}/${data.codeResults.length} blocchi di codice eseguiti realmente</div>`

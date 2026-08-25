@@ -68,6 +68,10 @@
                 <textarea id="input-agent-prompt" placeholder="Ask OmniClaw to solve a complex coding task, research the web, or run an autonomous multi-step workflow..." rows="2"></textarea>
                 <div class="prompt-form-footer">
                   <span class="hint-text">Shift + Enter for new line • Enter to execute</span>
+                  <label style="display:flex; align-items:center; gap:6px; font-size:11.5px; color:var(--text-muted); cursor:pointer;" title="Il modello scompone davvero il task in sotto-task con ruoli distinti (via Ollama) ed esegue ciascuno in sequenza, passando l'output reale del precedente come contesto al successivo — stile CrewAI role delegation. Se la scomposizione fallisce, ricade onestamente sull'agente singolo.">
+                    <input type="checkbox" id="input-crew-mode" />
+                    🧑‍🤝‍🧑 Crew mode (role delegation)
+                  </label>
                   <button type="submit" class="btn btn-primary" id="btn-submit-agent">
                     <span>Execute Workflow</span>
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>

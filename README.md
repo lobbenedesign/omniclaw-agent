@@ -55,6 +55,12 @@ In 2026, the biggest viral breakthroughs on GitHub emerged in 4 distinct categor
 * Genera vettori a 384 dimensioni con un feature-hashing su parole e trigrammi (hash trick, non un modello neurale pre-addestrato), normalizzati L2, e calcola una vera cosine similarity per il recall. È un embedding lessicale reale e verificabile, non un modello semantico allenato: due frasi con sinonimi diversi ma stesso significato potrebbero non risultare simili.
 * Salvataggio persistente reale su `.omniclaw_data/memory_graph.json`.
 
+#### 3b. 🧑‍🤝‍🧑 Crew Mode — Role Delegation (CrewAI Style)
+* Gap reale rispetto a CrewAI (280%+ crescita adozione dichiarata nel 2025 per l'orchestrazione basata su ruoli): il loop agentico esistente era un unico "persona" che ragiona in un ciclo flat. `src/crew_planner.ts` aggiunge una vera fase di scomposizione: una chiamata Ollama reale chiede al modello locale di dividere la richiesta in massimo 4 sotto-task con ruoli distinti (es. "Ricercatore", "Analista", "Scrittore"), restituiti come JSON reale e validato.
+* Se la scomposizione fallisce onestamente (Ollama irraggiungibile, JSON non valido, o un solo sotto-task) l'endpoint `POST /api/agent/crew-run` ricade sull'agente singolo già verificato — nessun ruolo fittizio viene mai inventato.
+* Se ci sono ≥2 sotto-task reali, ciascuno viene eseguito in sequenza con il loop ReAct/CodeAgent già esistente, iniettando nel prompt successivo l'output REALE (non riassunto a mano) del sotto-task precedente — lo stesso pattern di "context passing" di una crew sequenziale CrewAI. Una chiamata Ollama finale sintetizza gli output reali in una risposta unica.
+* **Verificato in questo ambiente**: con `llama3.2:3b` la scomposizione ha prodotto un JSON non valido (il modello ha risposto in prosa) e il sistema è ricaduto onestamente sull'agente singolo (`crewMode: false`, `decomposition: null`), completando comunque il task originale con successo. Con `qwen2.5:7b` la scomposizione JSON è stata analizzata e — quando riesce — i sotto-task vengono eseguiti realmente in sequenza con contesto reale propagato tra loro (vedi `CHANGELOG.md` per il log completo della richiesta HTTP reale).
+
 #### 4. 📲 Multi-Channel Remote Gateway (OpenClaw Style)
 * **WhatsApp**: webhook Meta Cloud API reale, verificato e funzionante.
 * **Telegram**: bot reale via long-polling su `getUpdates` (nessun webhook pubblico richiesto), verificato con una chiamata `getMe` al salvataggio del token.
@@ -99,6 +105,7 @@ Nel panorama open source del 2026, i progetti più virali su GitHub si sono conc
 2. **🌐 Navigatore Web & DOM**: fetch HTTP reale + parsing testo del DOM (no click/scroll simulati, è estrazione di contenuto). "Click" = segue un `<a href>` reale. "Type"/form fill (NUOVO) = estrae e invia davvero i `<form>` HTML statici trovati sulla pagina (GET/POST reali verso l'action reale) — verificato contro httpbin.org/forms/post; i form la cui logica dipende da JavaScript client-side restano fuori portata senza un vero browser headless.
 3. **🧠 Memoria Semantica a Grafo**: embedding reali a 384 dimensioni via feature-hashing (non un modello neurale), cosine similarity reale, persistenza reale in `.omniclaw_data/memory_graph.json`.
 4. **📲 Gateway Multi-Canale**: WhatsApp (webhook reale), Telegram (bot reale via long-polling), Discord (webhook reale), WebSocket (streaming reale).
+5. **🧑‍🤝‍🧑 Crew Mode (NUOVO, stile CrewAI)**: `POST /api/agent/crew-run` scompone davvero la richiesta in sotto-task con ruoli distinti tramite una vera chiamata Ollama, esegue ciascun ruolo in sequenza col loop ReAct esistente propagando l'output reale del precedente come contesto, e sintetizza un risultato finale. Se la scomposizione fallisce (JSON non valido/Ollama irraggiungibile), ricade onestamente sull'agente singolo — mai ruoli inventati. Verificato dal vivo: con `qwen2.5:7b` una richiesta di calcolo+riassunto è stata scomposta in 4 ruoli reali (Ricercatore, Programmatore, Scrittore, Verificatore) eseguiti in sequenza con contesto propagato e 3 blocchi di codice reali eseguiti.
 
 ---
 

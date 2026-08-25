@@ -2,6 +2,25 @@
 
 All entries describe what was genuinely verified in this environment, not aspirational claims. See `README.md`'s "Nota onesta" for the history of what was previously fabricated (invented performance metrics, fake "success" fallback text, unconnected Telegram token) and already fixed.
 
+## Unreleased (part 2) — real role-delegation "Crew mode" (CrewAI-style task decomposition)
+
+**Gap identified:** the real [CrewAI](https://github.com/crewAIInc/crewAI) project (public reporting cites a 280%+ adoption increase in 2025 for role-based multi-agent orchestration) lets you define roles ("Researcher", "Writer", "Manager"), assigns them tools, and handles delegation + task handoff automatically, passing one task's real output into the next via a `context` attribute. OmniClaw's existing `runAgentLoop` (server.ts) is a real, previously-verified single-persona ReAct/CodeAgent loop — one system prompt, one undifferentiated sequence of think/execute steps, no role decomposition at all.
+
+**What was built:**
+- `src/crew_planner.ts` — `decomposeIntoSubtasks(prompt, callOllama, model)` makes a real Ollama call asking the local model to break the request into up to 4 role-scoped subtasks (`{role, goal}`), parses the response as real JSON (tolerating a ```json fence), and validates the shape. Returns `null` — never a fabricated decomposition — if Ollama is unreachable, the response isn't valid JSON, or no valid subtasks survive validation.
+- `server.ts`: new `runCrew(prompt, model, maxStepsPerSubtask)`. If decomposition returns `null` or exactly 1 subtask, it honestly falls back to the existing single-agent `runAgentLoop` (`crewMode: false`) rather than staging a fake "crew" around one persona. If ≥2 real subtasks come back, each is run sequentially through the existing, already-verified `runAgentLoop`, with the **real** reply text of the previous subtask injected into the next subtask's prompt as context — CrewAI's sequential context-passing pattern. If every subtask succeeds, a final real Ollama call synthesizes all real subtask outputs into one combined reply; if that call fails, the last real subtask output is used as-is (never a fabricated synthesis).
+- New endpoint `POST /api/agent/crew-run {prompt, model, maxStepsPerSubtask}`.
+- `public/index.html` / `public/app.js`: new "🧑‍🤝‍🦱 Crew mode" checkbox on the agent prompt form; when checked, the UI calls `/api/agent/crew-run` instead of `/api/agent/run` and renders each real role as a pill plus the combined reply.
+
+**How it was verified — not just asserted:**
+1. `bun build server.ts --target=bun --outfile=/dev/null` — compiles clean.
+2. Started the real server and hit `POST /api/agent/crew-run` twice against the real local Ollama instance with the same prompt (calculate a circle's area for radius=7 with real executed code, then summarize):
+   - With `llama3.2:3b`: the model's response wasn't valid JSON, so `decomposeIntoSubtasks` correctly returned `null` and the endpoint honestly fell back to the single-agent path (`crewMode: false`, `decomposition: null`), still completing the original task successfully (`success: true`).
+   - With `qwen2.5:7b`: real decomposition succeeded — 4 real roles (`Ricercatore`, `Programmatore`, `Scrittore`, `Verificatore`) each with distinct goals — and `crewMode: true`. Each subtask ran the real ReAct loop; the `Programmatore` subtask's real reply shows it picked up the `Ricercatore` subtask's real prior output as context, then actually wrote and executed TypeScript that computed `153.93804002589985` for radius 7 (`codeResults` shows 3 real executed code blocks across the run). The final synthesis call produced a combined reply citing the real formula and the real computed number. Full request took 132s wall-clock against local Ollama — logged as-is, not simulated.
+3. Negative/fallback path is exercised for real (not just asserted): the `llama3.2:3b` run above is a genuine JSON-parsing failure caught live, not a manufactured test case.
+
+No score, benchmark, or "faster/better" claim is made anywhere in this change — only what the two real runs actually produced.
+
 ## Unreleased — real HTML form extraction and submission (no headless browser)
 
 **Gap identified:** the real open-source [browser-use](https://github.com/browser-use/browser-use) project (50k+ GitHub stars per public reporting as of 2026) drives an actual Playwright/Chromium browser and lets its agent "click buttons, type, and fill in forms" with the LLM deciding what to click. `src/browser_agent.ts` in this repo already declared a `BrowserAction` type with `"type"` as an action, but nothing implemented it — there was no way to fill or submit a form, only to fetch pages and follow `<a href>` links (`followLink`).
