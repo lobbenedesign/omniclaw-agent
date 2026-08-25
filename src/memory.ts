@@ -229,6 +229,107 @@ export class OmniMemoryStore {
   }
 
   /**
+   * Deduplicazione reale via clustering a cosine similarity (stile Mem0):
+   * confronta ogni coppia di nodi con lo stesso `type` usando i loro
+   * embedding reali a 384 dimensioni. Se la similarità supera la soglia,
+   * i due nodi vengono considerati "quasi identici" e uniti: si tiene il
+   * nodo con `confidence` più alta (a parità, quello con più `accessCount`),
+   * si sommano gli accessCount, si uniscono i tag, e l'altro viene rimosso
+   * insieme ai suoi archi. Nessuna euristica sul testo: solo similarità
+   * vettoriale reale già usata per il recall.
+   */
+  public deduplicate(threshold = 0.93): { merged: number; keptIds: string[] } {
+    const nodes = this.graph.nodes;
+    const toRemove = new Set<string>();
+    let mergedCount = 0;
+
+    for (let i = 0; i < nodes.length; i++) {
+      const a = nodes[i];
+      if (toRemove.has(a.id)) continue;
+      for (let j = i + 1; j < nodes.length; j++) {
+        const b = nodes[j];
+        if (toRemove.has(b.id) || a.type !== b.type) continue;
+
+        const vecA = a.vector || this.generateEmbedding(`${a.label} ${a.content}`);
+        const vecB = b.vector || this.generateEmbedding(`${b.label} ${b.content}`);
+        const sim = this.cosineSimilarity(vecA, vecB);
+        if (sim < threshold) continue;
+
+        // Determina chi tenere: confidence più alta, poi accessCount più alto.
+        const keep = (a.confidence > b.confidence) || (a.confidence === b.confidence && a.accessCount >= b.accessCount) ? a : b;
+        const drop = keep === a ? b : a;
+
+        keep.accessCount += drop.accessCount;
+        keep.confidence = Math.max(keep.confidence, drop.confidence);
+        keep.tags = Array.from(new Set([...keep.tags, ...drop.tags]));
+        keep.updatedAt = new Date().toISOString();
+
+        // Riassegna gli archi del nodo eliminato al nodo tenuto.
+        for (const e of this.graph.edges) {
+          if (e.sourceId === drop.id) e.sourceId = keep.id;
+          if (e.targetId === drop.id) e.targetId = keep.id;
+        }
+
+        toRemove.add(drop.id);
+        mergedCount += 1;
+        if (drop === a) break; // 'a' è stato rimosso: passa al prossimo i
+      }
+    }
+
+    if (mergedCount > 0) {
+      this.graph.nodes = this.graph.nodes.filter(n => !toRemove.has(n.id));
+      this.graph.edges = this.graph.edges.filter(e => e.sourceId !== e.targetId || !toRemove.has(e.sourceId));
+      this.save();
+    }
+
+    return { merged: mergedCount, keptIds: this.graph.nodes.map(n => n.id) };
+  }
+
+  /**
+   * Forgetting reale stile Mem0/decadimento della memoria umana: calcola un
+   * punteggio di "salienza" per ogni nodo combinando età reale (giorni dalla
+   * creazione), recency reale (giorni dall'ultimo accesso) e accessCount
+   * reale. I nodi con salienza sotto `minScore` vengono rimossi per davvero
+   * dal grafo e salvati su disco. Le `rule`/`preference` con confidence >=
+   * 0.95 sono protette dal decadimento (sono impostazioni esplicite
+   * dell'utente, non fatti effimeri). Nessuna cancellazione simulata: i nodi
+   * scartati spariscono realmente da `.omniclaw_data/memory_graph.json`.
+   */
+  public applyDecay(minScore = 0.15): { forgotten: number; scores: { id: string; label: string; score: number }[] } {
+    const now = Date.now();
+    const scores: { id: string; label: string; score: number }[] = [];
+    const toForget = new Set<string>();
+
+    for (const n of this.graph.nodes) {
+      const ageDays = Math.max(0, (now - new Date(n.createdAt).getTime()) / 86400000);
+      const recencyDays = Math.max(0, (now - new Date(n.updatedAt).getTime()) / 86400000);
+
+      // Decadimento esponenziale sulla recency (metà vita ~14 giorni),
+      // rinforzato dagli accessi reali (log per smorzare gli outlier),
+      // penalizzato lievemente dall'età assoluta.
+      const recencyFactor = Math.exp(-recencyDays / 14);
+      const accessFactor = Math.log2(n.accessCount + 1) / 4;
+      const ageFactor = Math.exp(-ageDays / 90);
+      const score = Number(Math.min(1, recencyFactor * 0.5 + accessFactor * 0.35 + ageFactor * 0.15).toFixed(4));
+
+      scores.push({ id: n.id, label: n.label, score });
+
+      const protectedNode = (n.type === "rule" || n.type === "preference") && n.confidence >= 0.95;
+      if (!protectedNode && score < minScore) {
+        toForget.add(n.id);
+      }
+    }
+
+    if (toForget.size > 0) {
+      this.graph.nodes = this.graph.nodes.filter(n => !toForget.has(n.id));
+      this.graph.edges = this.graph.edges.filter(e => !toForget.has(e.sourceId) && !toForget.has(e.targetId));
+      this.save();
+    }
+
+    return { forgotten: toForget.size, scores };
+  }
+
+  /**
    * Costruisce il blocco di contesto reale da iniettare nel prompt: usa
    * recall() con similarità coseno reale sulla query, non un testo fisso.
    * Ritorna stringa vuota se nessun nodo supera una soglia minima di

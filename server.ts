@@ -39,14 +39,37 @@ function extractCodeBlocks(text: string): { language: "typescript" | "python" | 
   return blocks;
 }
 
+/** Chiama davvero Ollama con una lista di messaggi reale (system + storia). Nessun testo fabbricato: se la chiamata fallisce, ritorna ok:false. */
+async function callOllama(model: string, messages: { role: string; content: string }[]): Promise<{ ok: boolean; content: string }> {
+  try {
+    const res = await fetch(`${OLLAMA_HOST}/api/chat`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model, messages, stream: false }),
+      signal: AbortSignal.timeout(60000)
+    });
+    if (!res.ok) return { ok: false, content: "" };
+    const data: any = await res.json();
+    return { ok: true, content: data.message?.content || "" };
+  } catch {
+    return { ok: false, content: "" };
+  }
+}
+
 /**
- * Loop agente reale: recall di memoria reale -> chiamata LLM reale via Ollama
- * -> se l'LLM propone blocchi di codice, li esegue DAVVERO col code engine
- * sandboxato e riporta output reale nel trace. Se Ollama non è raggiungibile
- * ritorna un errore onesto, mai un messaggio di successo fabbricato.
+ * Loop agentico REALE multi-step, ispirato al ciclo ReAct/CodeAgent di
+ * smolagents (huggingface/smolagents): a ogni step si richiama davvero
+ * l'LLM locale via Ollama passandogli l'intera cronologia dei messaggi,
+ * inclusi gli output REALI dei blocchi di codice eseguiti nello step
+ * precedente (stdout/stderr veri, non riassunti a mano). Il loop si ferma
+ * quando: (a) il modello risponde senza proporre alcun blocco di codice
+ * (= considera il task concluso), oppure (b) si raggiunge `maxSteps`.
+ * Nessun fallback fittizio: se Ollama non risponde in un qualunque step,
+ * il loop si interrompe con un errore esplicito.
  */
-async function runAgentLoop(prompt: string, model: string) {
+async function runAgentLoop(prompt: string, model: string, maxSteps = 4) {
   const trace: any[] = [];
+  maxSteps = Math.max(1, Math.min(8, Math.floor(maxSteps) || 4));
 
   const memoryContext = memoryStore.formatForPrompt(prompt);
   trace.push({
@@ -56,75 +79,93 @@ async function runAgentLoop(prompt: string, model: string) {
     detail: memoryContext ? "Nodi rilevanti recuperati con similarità coseno reale" : "Nessun nodo di memoria supera la soglia di similarità"
   });
 
-  const systemPrompt = `Sei OMNICLAW, un agente autonomo che unisce esecuzione di codice reale (TypeScript/Python/Shell), navigazione web reale e memoria a grafo reale.
-Se la richiesta richiede calcoli, elaborazione dati o azioni concrete, rispondi includendo un blocco di codice fenced (\`\`\`typescript, \`\`\`python o \`\`\`shell) con codice REALMENTE eseguibile: verrà eseguito davvero e il suo output reale ti verrà mostrato.
+  const systemPrompt = `Sei OMNICLAW, un agente autonomo che ragiona in cicli (osserva -> pensa -> agisce) unendo esecuzione di codice reale (TypeScript/Python/Shell), navigazione web reale e memoria a grafo reale.
+Se la richiesta richiede calcoli, elaborazione dati o azioni concrete, rispondi includendo un blocco di codice fenced (\`\`\`typescript, \`\`\`python o \`\`\`shell) con codice REALMENTE eseguibile: verrà eseguito davvero in sandbox e l'output reale (stdout/stderr) ti verrà rimostrato nel messaggio successivo, così potrai correggere o proseguire.
+Quando hai raggiunto una risposta finale completa e non hai più bisogno di eseguire altro codice, rispondi SOLO in linguaggio naturale, SENZA alcun blocco di codice: questo segnala che il task è concluso.
+Hai a disposizione al massimo ${maxSteps} cicli di ragionamento/esecuzione.
 ${memoryContext}
 Cartella di lavoro corrente: ${process.cwd()}`;
 
-  let ollamaOk = false;
-  let replyText = "";
-  try {
-    const ollamaRes = await fetch(`${OLLAMA_HOST}/api/chat`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model,
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: prompt }
-        ],
-        stream: false
-      }),
-      signal: AbortSignal.timeout(60000)
-    });
-    if (ollamaRes.ok) {
-      const data: any = await ollamaRes.json();
-      replyText = data.message?.content || "";
-      ollamaOk = true;
-    }
-  } catch {
-    ollamaOk = false;
-  }
+  const messages: { role: string; content: string }[] = [
+    { role: "system", content: systemPrompt },
+    { role: "user", content: prompt }
+  ];
 
-  if (!ollamaOk) {
-    trace.push({
-      step: 2,
-      type: "error",
-      title: "LLM locale non raggiungibile",
-      detail: `Nessuna risposta da Ollama su ${OLLAMA_HOST}. Avvia Ollama ('ollama serve') e verifica che il modello '${model}' sia disponibile ('ollama pull ${model}').`
-    });
-    return {
-      success: false,
-      model,
-      prompt,
-      reply: "",
-      error: `Impossibile contattare Ollama su ${OLLAMA_HOST}. Nessuna risposta è stata generata: nessun task è stato realmente eseguito.`,
-      trace,
-      codeResults: []
-    };
-  }
-
-  trace.push({
-    step: 2,
-    type: "reasoning",
-    title: "Risposta reale del modello",
-    detail: `Risposta ricevuta da ${model} (${replyText.length} caratteri)`
-  });
-
-  // Esecuzione REALE dei blocchi di codice proposti dal modello (Think in Code).
-  const blocks = extractCodeBlocks(replyText);
   const codeResults: any[] = [];
-  for (const block of blocks) {
-    const result = await codeEngine.execute(block.code, block.language);
-    codeResults.push(result);
+  let lastReply = "";
+  let stepsUsed = 0;
+
+  for (let iteration = 1; iteration <= maxSteps; iteration++) {
+    stepsUsed = iteration;
+    const { ok, content } = await callOllama(model, messages);
+
+    if (!ok) {
+      trace.push({
+        step: trace.length + 1,
+        type: "error",
+        title: "LLM locale non raggiungibile",
+        detail: `Nessuna risposta da Ollama su ${OLLAMA_HOST} allo step ${iteration}/${maxSteps}. Avvia Ollama ('ollama serve') e verifica che il modello '${model}' sia disponibile ('ollama pull ${model}').`
+      });
+      return {
+        success: false,
+        model,
+        prompt,
+        reply: lastReply,
+        error: `Impossibile contattare Ollama su ${OLLAMA_HOST} allo step ${iteration}. Nessuna risposta è stata generata in questo step: il loop si interrompe onestamente invece di fabbricare un risultato.`,
+        trace,
+        codeResults,
+        stepsUsed: iteration
+      };
+    }
+
+    lastReply = content;
+    messages.push({ role: "assistant", content });
     trace.push({
       step: trace.length + 1,
-      type: "code_execution",
-      title: `Esecuzione reale (${block.language})`,
-      detail: result.success
-        ? `Exit 0 in ${result.executionTimeMs}ms — stdout: ${result.stdout.slice(0, 200) || "(vuoto)"}`
-        : `Fallita (exit ${result.exitCode}) — stderr: ${result.stderr.slice(0, 200)}`
+      type: "reasoning",
+      title: `Ciclo ${iteration}/${maxSteps} — risposta reale del modello`,
+      detail: `Risposta ricevuta da ${model} (${content.length} caratteri)`
     });
+
+    const blocks = extractCodeBlocks(content);
+    if (blocks.length === 0) {
+      // Nessun codice proposto: il modello considera il task concluso.
+      trace.push({
+        step: trace.length + 1,
+        type: "loop_stop",
+        title: "Loop terminato: nessun ulteriore codice proposto",
+        detail: `Il modello ha risposto in linguaggio naturale senza blocchi di codice al ciclo ${iteration}: risposta considerata finale.`
+      });
+      break;
+    }
+
+    let observationText = "";
+    for (const block of blocks) {
+      const result = await codeEngine.execute(block.code, block.language);
+      codeResults.push(result);
+      trace.push({
+        step: trace.length + 1,
+        type: "code_execution",
+        title: `Ciclo ${iteration}/${maxSteps} — esecuzione reale (${block.language})`,
+        detail: result.success
+          ? `Exit 0 in ${result.executionTimeMs}ms — stdout: ${result.stdout.slice(0, 200) || "(vuoto)"}`
+          : `Fallita (exit ${result.exitCode}) — stderr: ${result.stderr.slice(0, 200)}`
+      });
+      observationText += `\n\n[Output reale esecuzione ${block.language}]\nexitCode: ${result.exitCode}\nstdout:\n${result.stdout.slice(0, 1500)}\nstderr:\n${result.stderr.slice(0, 800)}`;
+    }
+
+    if (iteration === maxSteps) {
+      trace.push({
+        step: trace.length + 1,
+        type: "loop_stop",
+        title: "Loop terminato: limite step raggiunto",
+        detail: `Raggiunto il limite configurato di ${maxSteps} cicli.`
+      });
+      break;
+    }
+
+    // Reinietta l'output REALE come osservazione per il prossimo ciclo (ReAct-style).
+    messages.push({ role: "user", content: `Ecco l'output reale ottenuto eseguendo davvero il codice che hai proposto.${observationText}\n\nContinua il ragionamento: se il task è concluso rispondi senza blocchi di codice, altrimenti proponi il prossimo blocco di codice reale da eseguire.` });
   }
 
   if (prompt.length > 10) {
@@ -141,10 +182,52 @@ Cartella di lavoro corrente: ${process.cwd()}`;
     step: trace.length + 1,
     type: "completion",
     title: "Esecuzione completata",
-    detail: codeResults.length > 0 ? `${codeResults.filter(r => r.success).length}/${codeResults.length} blocchi di codice eseguiti con successo` : "Nessun blocco di codice proposto dal modello per questa richiesta"
+    detail: `${stepsUsed}/${maxSteps} cicli usati — ${codeResults.length > 0 ? `${codeResults.filter(r => r.success).length}/${codeResults.length} blocchi di codice eseguiti con successo` : "nessun blocco di codice proposto dal modello"}`
   });
 
-  return { success: true, model, prompt, reply: replyText, trace, codeResults };
+  return { success: true, model, prompt, reply: lastReply, trace, codeResults, stepsUsed };
+}
+
+/**
+ * Comando "reflect" reale: rilegge davvero le ultime N richieste utente
+ * salvate come nodi di memoria (type "fact", tag "session-task") e fa una
+ * VERA chiamata all'LLM locale chiedendogli di estrarre pattern/preferenze
+ * ricorrenti. Il risultato, se l'LLM risponde, viene salvato come un nuovo
+ * nodo di memoria di tipo "preference" così da influenzare i recall futuri.
+ * Se non ci sono abbastanza task in memoria o Ollama non risponde, ritorna
+ * un errore onesto invece di un'estrazione inventata.
+ */
+async function runReflect(model: string, lastN = 15) {
+  const tasks = memoryStore.getGraph().nodes
+    .filter(n => n.type === "fact" && n.tags.includes("session-task"))
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+    .slice(0, lastN);
+
+  if (tasks.length < 3) {
+    return { success: false, error: `Servono almeno 3 task reali in memoria per riflettere (trovati ${tasks.length}). Esegui prima qualche richiesta con /api/agent/run.` };
+  }
+
+  const historyText = tasks.map((t, i) => `${i + 1}. ${t.content}`).join("\n");
+  const reflectPrompt = `Ecco la cronologia REALE delle ultime ${tasks.length} richieste che l'utente ha fatto a questo agente:\n${historyText}\n\nAnalizza questi task reali ed estrai in modo sintetico (max 5 righe puntate) pattern ricorrenti o preferenze dell'utente (es. linguaggi preferiti, tipo di task ricorrenti, stile di risposta desiderato). Rispondi SOLO con l'elenco puntato, senza premesse.`;
+
+  const { ok, content } = await callOllama(model, [
+    { role: "system", content: "Sei un modulo di auto-riflessione che analizza la cronologia reale di un agente AI per estrarne pattern utili." },
+    { role: "user", content: reflectPrompt }
+  ]);
+
+  if (!ok || !content.trim()) {
+    return { success: false, error: `Impossibile contattare Ollama su ${OLLAMA_HOST} per la riflessione: nessun pattern è stato realmente estratto.` };
+  }
+
+  const node = memoryStore.addOrUpdateNode({
+    type: "preference",
+    label: `Pattern utente (reflect ${new Date().toLocaleDateString()})`,
+    content: content.trim().slice(0, 800),
+    confidence: 0.85,
+    tags: ["reflection", "auto-extracted"]
+  });
+
+  return { success: true, analyzedTasks: tasks.length, extractedPatterns: content.trim(), node };
 }
 
 console.log(`\n======================================================`);
@@ -244,6 +327,34 @@ const server = Bun.serve({
       }
     }
 
+    // 2b. Deduplicazione reale via clustering a cosine similarity (Mem0-style)
+    if (url.pathname === "/api/memory/deduplicate" && req.method === "POST") {
+      try {
+        let body: any = {};
+        try { body = await req.json(); } catch {}
+        const threshold = typeof body.threshold === "number" ? body.threshold : 0.93;
+        const result = memoryStore.deduplicate(threshold);
+        server.publish("omniclaw-events", JSON.stringify({ type: "memory_deduplicated", ...result }));
+        return new Response(JSON.stringify(result), { headers });
+      } catch (e: any) {
+        return new Response(JSON.stringify({ error: e.message }), { status: 500, headers });
+      }
+    }
+
+    // 2c. Forgetting reale basato su decadimento reale (età + recency + accessCount)
+    if (url.pathname === "/api/memory/decay" && req.method === "POST") {
+      try {
+        let body: any = {};
+        try { body = await req.json(); } catch {}
+        const minScore = typeof body.minScore === "number" ? body.minScore : 0.15;
+        const result = memoryStore.applyDecay(minScore);
+        server.publish("omniclaw-events", JSON.stringify({ type: "memory_decayed", forgotten: result.forgotten }));
+        return new Response(JSON.stringify(result), { headers });
+      } catch (e: any) {
+        return new Response(JSON.stringify({ error: e.message }), { status: 500, headers });
+      }
+    }
+
     if (url.pathname === "/api/memory/node" && req.method === "DELETE") {
       try {
         const body: any = await req.json();
@@ -282,6 +393,20 @@ const server = Bun.serve({
       }
     }
 
+    // 4b. Follow a real link extracted from the last navigated/searched page
+    // (no headless browser — real HTTP GET on the real href, see browser_agent.ts)
+    if (url.pathname === "/api/browser/click" && req.method === "POST") {
+      try {
+        const body: any = await req.json();
+        const target = typeof body.index === "number" ? { index: body.index } : { textMatch: body.text || "" };
+        const result = await browserAgent.followLink(target);
+        server.publish("omniclaw-events", JSON.stringify({ type: "browser_action", result }));
+        return new Response(JSON.stringify(result), { headers, status: result.success ? 200 : 404 });
+      } catch (e: any) {
+        return new Response(JSON.stringify({ error: e.message }), { status: 500, headers });
+      }
+    }
+
     // 5. Autonomous Agent Loop (Think in Code + Web + Memory) — reale, mai fabbricato
     if (url.pathname === "/api/agent/run" && req.method === "POST") {
       try {
@@ -289,12 +414,27 @@ const server = Bun.serve({
         const prompt = body.prompt || "";
         const model = body.model || activeModel;
 
-        const result = await runAgentLoop(prompt, model);
+        const result = await runAgentLoop(prompt, model, body.maxSteps);
         if (result.success) totalTasksExecuted += 1;
         lastExecutionTrace = result.trace;
         server.publish("omniclaw-events", JSON.stringify({ type: "agent_finished", prompt, trace: result.trace }));
 
         return new Response(JSON.stringify(result), { headers: { ...headers }, status: result.success ? 200 : 502 });
+      } catch (e: any) {
+        return new Response(JSON.stringify({ error: e.message }), { status: 500, headers });
+      }
+    }
+
+    // 5b. Self-reflection over real session history (see runReflect)
+    if (url.pathname === "/api/agent/reflect" && req.method === "POST") {
+      try {
+        const body: any = await req.json();
+        const model = body.model || activeModel;
+        const result = await runReflect(model, body.lastN);
+        if (result.success) {
+          server.publish("omniclaw-events", JSON.stringify({ type: "reflection_saved", node: result.node }));
+        }
+        return new Response(JSON.stringify(result), { headers, status: result.success ? 200 : 422 });
       } catch (e: any) {
         return new Response(JSON.stringify({ error: e.message }), { status: 500, headers });
       }
