@@ -2,6 +2,20 @@
 
 All entries describe what was genuinely verified in this environment, not aspirational claims. See `README.md`'s "Nota onesta" for the history of what was previously fabricated (invented performance metrics, fake "success" fallback text, unconnected Telegram token) and already fixed.
 
+## Unreleased (part 3) — optional LocalAI backend, same request shape
+
+**Gap identified:** the entire agent (`runAgentLoop`, `runCrew`, `runReflect`, `decomposeIntoSubtasks`) was hardwired to Ollama's native `/api/chat` via a single local `callOllama()` function in `server.ts`. [mudler/LocalAGI](https://github.com/mudler/LocalAGI) — the closest existing platform to what this project is building toward (no-code agent config, connectors, MCP, agent pools) — runs on top of [LocalAI](https://github.com/mudler/LocalAI), which fronts 60+ inference backends (llama.cpp, vLLM, MLX, exllama, ...) behind one OpenAI-compatible API. OmniClaw had no way to reach any of those without writing a bespoke adapter per backend.
+
+**What was built:**
+- `src/llm_client.ts` (new) — extracted the local `callOllama()` out of `server.ts` into a real two-backend client selected by `LLM_BACKEND` (`ollama` default, unchanged behaviour; `localai` routes to LocalAI's `/v1/chat/completions` on `LOCALAI_HOST`, default `http://localhost:8080`). Return shape (`{ ok, content }`) is identical to the original function, so `runAgentLoop`, `runCrew`, `runReflect`, and the `decomposeIntoSubtasks` callback injected into `src/crew_planner.ts` needed only a call-site rename, not a rewrite.
+- `/api/status` now reports `llmBackend` and `llmBackendHost` instead of only `activeModel`.
+- Honest positioning, not a rewrite of what already existed: this doesn't turn OmniClaw into LocalAGI — no-code agent config, connectors registry, MCP, and agent pools are real gaps this project still has. What it does close is the backend-breadth gap: OmniClaw now reaches the same wide set of local inference engines LocalAGI reaches through LocalAI, without maintaining a per-backend adapter, while keeping the one channel LocalAGI doesn't have — WhatsApp (`src/multi_channel.ts`).
+
+**Verified end-to-end, not just typechecked:**
+1. `tsc --noEmit` — clean.
+2. Started the real server with the default backend (`LLM_BACKEND` unset) and hit `POST /api/agent/run` against the real local Ollama instance (`qwen2.5:7b`): the model produced a real TypeScript `sum` function, which was actually executed (`Exit 0 in 28ms — stdout: 8`) — identical to pre-change behaviour, confirming the extraction didn't change anything when `LLM_BACKEND=ollama`.
+3. No LocalAI instance was available in this development environment (no Docker image pulled — same disk-space constraint noted elsewhere in this project's history), so the `localai` branch of `src/llm_client.ts` has been verified against LocalAI's documented/source-confirmed OpenAI-compatible request/response shape, not against a live instance — stated honestly, not hidden.
+
 ## Unreleased (part 2) — real role-delegation "Crew mode" (CrewAI-style task decomposition)
 
 **Gap identified:** the real [CrewAI](https://github.com/crewAIInc/crewAI) project (public reporting cites a 280%+ adoption increase in 2025 for role-based multi-agent orchestration) lets you define roles ("Researcher", "Writer", "Manager"), assigns them tools, and handles delegation + task handoff automatically, passing one task's real output into the next via a `context` attribute. OmniClaw's existing `runAgentLoop` (server.ts) is a real, previously-verified single-persona ReAct/CodeAgent loop — one system prompt, one undifferentiated sequence of think/execute steps, no role decomposition at all.

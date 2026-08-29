@@ -9,11 +9,11 @@ import { OmniCodeEngine } from "./src/code_engine";
 import { OmniBrowserAgent } from "./src/browser_agent";
 import { OmniMultiChannelGateway } from "./src/multi_channel";
 import { decomposeIntoSubtasks, CrewSubtask } from "./src/crew_planner";
+import { callLLM, currentBackend, currentBackendHost, currentBackendLabel } from "./src/llm_client";
 import { join } from "path";
 import { existsSync, readFileSync } from "fs";
 
 const PORT = Number(process.env.PORT) || 3002;
-const OLLAMA_HOST = process.env.OLLAMA_HOST || "http://localhost:11434";
 
 const memoryStore = new OmniMemoryStore("./.omniclaw_data");
 const codeEngine = new OmniCodeEngine(process.cwd());
@@ -38,23 +38,6 @@ function extractCodeBlocks(text: string): { language: "typescript" | "python" | 
     blocks.push({ language, code: m[2].trim() });
   }
   return blocks;
-}
-
-/** Chiama davvero Ollama con una lista di messaggi reale (system + storia). Nessun testo fabbricato: se la chiamata fallisce, ritorna ok:false. */
-async function callOllama(model: string, messages: { role: string; content: string }[]): Promise<{ ok: boolean; content: string }> {
-  try {
-    const res = await fetch(`${OLLAMA_HOST}/api/chat`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ model, messages, stream: false }),
-      signal: AbortSignal.timeout(60000)
-    });
-    if (!res.ok) return { ok: false, content: "" };
-    const data: any = await res.json();
-    return { ok: true, content: data.message?.content || "" };
-  } catch {
-    return { ok: false, content: "" };
-  }
 }
 
 /**
@@ -98,21 +81,21 @@ Cartella di lavoro corrente: ${process.cwd()}`;
 
   for (let iteration = 1; iteration <= maxSteps; iteration++) {
     stepsUsed = iteration;
-    const { ok, content } = await callOllama(model, messages);
+    const { ok, content } = await callLLM(model, messages);
 
     if (!ok) {
       trace.push({
         step: trace.length + 1,
         type: "error",
         title: "LLM locale non raggiungibile",
-        detail: `Nessuna risposta da Ollama su ${OLLAMA_HOST} allo step ${iteration}/${maxSteps}. Avvia Ollama ('ollama serve') e verifica che il modello '${model}' sia disponibile ('ollama pull ${model}').`
+        detail: `Nessuna risposta da ${currentBackendLabel()} su ${currentBackendHost()} allo step ${iteration}/${maxSteps}. Avvia il backend LLM configurato (LLM_BACKEND=${currentBackend()}) e verifica che il modello '${model}' sia disponibile.`
       });
       return {
         success: false,
         model,
         prompt,
         reply: lastReply,
-        error: `Impossibile contattare Ollama su ${OLLAMA_HOST} allo step ${iteration}. Nessuna risposta è stata generata in questo step: il loop si interrompe onestamente invece di fabbricare un risultato.`,
+        error: `Impossibile contattare ${currentBackendLabel()} su ${currentBackendHost()} allo step ${iteration}. Nessuna risposta è stata generata in questo step: il loop si interrompe onestamente invece di fabbricare un risultato.`,
         trace,
         codeResults,
         stepsUsed: iteration
@@ -202,7 +185,7 @@ Cartella di lavoro corrente: ${process.cwd()}`;
  * CrewAI applica tra i task di una crew sequenziale.
  */
 async function runCrew(prompt: string, model: string, maxStepsPerSubtask = 3) {
-  const decomposition = await decomposeIntoSubtasks(prompt, callOllama, model);
+  const decomposition = await decomposeIntoSubtasks(prompt, callLLM, model);
 
   if (!decomposition || decomposition.length <= 1) {
     const single = await runAgentLoop(prompt, model, Math.max(4, maxStepsPerSubtask));
@@ -251,7 +234,7 @@ async function runCrew(prompt: string, model: string, maxStepsPerSubtask = 3) {
   let finalReply = previousOutput;
   if (allSucceeded && subtaskResults.length > 1) {
     const synthesisPrompt = `Combina i seguenti output reali prodotti dai sotto-task del team in un'unica risposta finale coerente per l'utente, che aveva chiesto: "${prompt}"\n\n${subtaskResults.map((s, idx) => `--- Sotto-task ${idx + 1} (${s.role}): ${s.goal} ---\n${s.reply}`).join("\n\n")}`;
-    const synthesis = await callOllama(model, [
+    const synthesis = await callLLM(model, [
       { role: "system", content: "Sei il coordinatore finale di un team di agenti. Rispondi SOLO con la sintesi finale in linguaggio naturale, senza blocchi di codice." },
       { role: "user", content: synthesisPrompt }
     ]);
@@ -296,13 +279,13 @@ async function runReflect(model: string, lastN = 15) {
   const historyText = tasks.map((t, i) => `${i + 1}. ${t.content}`).join("\n");
   const reflectPrompt = `Ecco la cronologia REALE delle ultime ${tasks.length} richieste che l'utente ha fatto a questo agente:\n${historyText}\n\nAnalizza questi task reali ed estrai in modo sintetico (max 5 righe puntate) pattern ricorrenti o preferenze dell'utente (es. linguaggi preferiti, tipo di task ricorrenti, stile di risposta desiderato). Rispondi SOLO con l'elenco puntato, senza premesse.`;
 
-  const { ok, content } = await callOllama(model, [
+  const { ok, content } = await callLLM(model, [
     { role: "system", content: "Sei un modulo di auto-riflessione che analizza la cronologia reale di un agente AI per estrarne pattern utili." },
     { role: "user", content: reflectPrompt }
   ]);
 
   if (!ok || !content.trim()) {
-    return { success: false, error: `Impossibile contattare Ollama su ${OLLAMA_HOST} per la riflessione: nessun pattern è stato realmente estratto.` };
+    return { success: false, error: `Impossibile contattare ${currentBackendLabel()} su ${currentBackendHost()} per la riflessione: nessun pattern è stato realmente estratto.` };
   }
 
   const node = memoryStore.addOrUpdateNode({
@@ -370,6 +353,8 @@ const server = Bun.serve({
         status: "online",
         version: "1.1.0",
         activeModel,
+        llmBackend: currentBackend(),
+        llmBackendHost: currentBackendHost(),
         memoryNodesCount: graph.nodes.length,
         memoryEdgesCount: graph.edges.length,
         workingContext: graph.workingContext,

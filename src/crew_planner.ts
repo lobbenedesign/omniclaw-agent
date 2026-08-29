@@ -58,18 +58,19 @@ function validateSubtasks(raw: any[]): CrewSubtask[] | null {
 }
 
 /**
- * Chiede davvero al modello locale (via il `callOllama` fornito dal chiamante,
- * per riusare esattamente la stessa connessione/gestione errori già verificata
- * in server.ts) di scomporre `prompt` in sotto-task con ruoli distinti.
- * Ritorna `null` — mai un array fabbricato — se Ollama non risponde o la
- * risposta non è un JSON valido nel formato atteso.
+ * Chiede davvero al modello locale (via il `callLLM` fornito dal chiamante —
+ * Ollama o LocalAI, vedi `src/llm_client.ts` — per riusare esattamente la
+ * stessa connessione/gestione errori già verificata in server.ts) di
+ * scomporre `prompt` in sotto-task con ruoli distinti. Ritorna `null` — mai
+ * un array fabbricato — se il backend LLM non risponde o la risposta non è
+ * un JSON valido nel formato atteso.
  */
 export async function decomposeIntoSubtasks(
   prompt: string,
-  callOllama: (model: string, messages: { role: string; content: string }[]) => Promise<{ ok: boolean; content: string }>,
+  callLLM: (model: string, messages: { role: string; content: string }[]) => Promise<{ ok: boolean; content: string }>,
   model: string
 ): Promise<CrewSubtask[] | null> {
-  const { ok, content } = await callOllama(model, [
+  const { ok, content } = await callLLM(model, [
     { role: "system", content: DECOMPOSE_SYSTEM_PROMPT },
     { role: "user", content: prompt }
   ]);

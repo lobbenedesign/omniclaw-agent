@@ -69,6 +69,18 @@ In 2026, the biggest viral breakthroughs on GitHub emerged in 4 distinct categor
 
 ---
 
+#### 5. 🔌 LLM Backend: Ollama or LocalAI
+
+Every real LLM call in this project (`runAgentLoop`, Crew mode, `reflect`) goes through `src/llm_client.ts`. By default it talks to **Ollama** (`http://localhost:11434`), exactly as before. Set `LLM_BACKEND=localai` to route the same calls through a local **[LocalAI](https://github.com/mudler/LocalAI)** instance instead (`http://localhost:8080` by default) — LocalAI fronts 60+ inference backends (llama.cpp, vLLM, MLX, exllama, ...) behind one OpenAI-compatible API, so OmniClaw gains access to all of them without a bespoke adapter per backend. Compared to [LocalAGI](https://github.com/mudler/LocalAGI) — the closest existing no-code agent platform built on LocalAI — this doesn't close every gap (no-code config, connectors registry, MCP, agent pools are real gaps this project still has), but it does close the backend-breadth one, while keeping the one channel LocalAGI doesn't have: **WhatsApp**.
+
+```bash
+# Ollama (default, unchanged)
+bun server.ts
+
+# LocalAI instead
+LLM_BACKEND=localai LOCALAI_HOST=http://localhost:8080 bun server.ts
+```
+
 ### 🛠️ Quick Start
 
 ```bash
@@ -105,7 +117,16 @@ Nel panorama open source del 2026, i progetti più virali su GitHub si sono conc
 2. **🌐 Navigatore Web & DOM**: fetch HTTP reale + parsing testo del DOM (no click/scroll simulati, è estrazione di contenuto). "Click" = segue un `<a href>` reale. "Type"/form fill (NUOVO) = estrae e invia davvero i `<form>` HTML statici trovati sulla pagina (GET/POST reali verso l'action reale) — verificato contro httpbin.org/forms/post; i form la cui logica dipende da JavaScript client-side restano fuori portata senza un vero browser headless.
 3. **🧠 Memoria Semantica a Grafo**: embedding reali a 384 dimensioni via feature-hashing (non un modello neurale), cosine similarity reale, persistenza reale in `.omniclaw_data/memory_graph.json`.
 4. **📲 Gateway Multi-Canale**: WhatsApp (webhook reale), Telegram (bot reale via long-polling), Discord (webhook reale), WebSocket (streaming reale).
-5. **🧑‍🤝‍🧑 Crew Mode (NUOVO, stile CrewAI)**: `POST /api/agent/crew-run` scompone davvero la richiesta in sotto-task con ruoli distinti tramite una vera chiamata Ollama, esegue ciascun ruolo in sequenza col loop ReAct esistente propagando l'output reale del precedente come contesto, e sintetizza un risultato finale. Se la scomposizione fallisce (JSON non valido/Ollama irraggiungibile), ricade onestamente sull'agente singolo — mai ruoli inventati. Verificato dal vivo: con `qwen2.5:7b` una richiesta di calcolo+riassunto è stata scomposta in 4 ruoli reali (Ricercatore, Programmatore, Scrittore, Verificatore) eseguiti in sequenza con contesto propagato e 3 blocchi di codice reali eseguiti.
+5. **🧑‍🤝‍🧑 Crew Mode (NUOVO, stile CrewAI)**: `POST /api/agent/crew-run` scompone davvero la richiesta in sotto-task con ruoli distinti tramite una vera chiamata all'LLM locale, esegue ciascun ruolo in sequenza col loop ReAct esistente propagando l'output reale del precedente come contesto, e sintetizza un risultato finale. Se la scomposizione fallisce (JSON non valido/backend irraggiungibile), ricade onestamente sull'agente singolo — mai ruoli inventati. Verificato dal vivo: con `qwen2.5:7b` una richiesta di calcolo+riassunto è stata scomposta in 4 ruoli reali (Ricercatore, Programmatore, Scrittore, Verificatore) eseguiti in sequenza con contesto propagato e 3 blocchi di codice reali eseguiti.
+6. **🔌 Backend LLM: Ollama o LocalAI (NUOVO)**: ogni chiamata reale all'LLM passa da `src/llm_client.ts`. Di default parla con **Ollama** (`http://localhost:11434`), come prima. Con `LLM_BACKEND=localai` le stesse chiamate vanno a un'istanza **[LocalAI](https://github.com/mudler/LocalAI)** locale (`http://localhost:8080` di default), che espone dietro un'unica API OpenAI-compatibile oltre 60 backend di inferenza (llama.cpp, vLLM, MLX, exllama...) — senza scrivere un adapter dedicato per ciascuno. Rispetto a [LocalAGI](https://github.com/mudler/LocalAGI) (la piattaforma di agenti no-code più vicina a questo progetto, costruita sopra LocalAI): non chiude il divario sulla configurazione no-code, sui connettori, su MCP o sugli agent pool — restano gap reali — ma chiude quello sull'ampiezza dei backend, mantenendo l'unico canale che LocalAGI non ha: **WhatsApp**.
+
+```bash
+# Ollama (default, invariato)
+bun server.ts
+
+# LocalAI al suo posto
+LLM_BACKEND=localai LOCALAI_HOST=http://localhost:8080 bun server.ts
+```
 
 ---
 
